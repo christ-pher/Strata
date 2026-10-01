@@ -71,6 +71,24 @@ def ask(port, prompt, max_tokens):
     return value, time.monotonic() - start
 
 
+def benchmark_config(source, workers=None, vision="none", exe=None, engine_env=()):
+    """Copy execution settings without local authentication or UI preferences."""
+    cfg = {k: source[k] for k in ("exe", "args", "cwd", "tokenizer", "model_name", "lib_dirs") if k in source}
+    cfg["args"] = [a for a in source["args"] if a != "--vision"] + ["--prompt-cache", "0"]
+    if workers is not None:
+        cfg["args"] += ["--pool-workers", str(workers)]
+    if vision == "gpu":
+        cfg["vision"] = dict(source["vision"])
+        cfg["args"] += ["--vision"]
+    if exe:
+        cfg["exe"] = str(exe.resolve())
+    cfg["env"] = dict(source.get("env", {}))
+    for item in engine_env:
+        name, value = item.split("=", 1)
+        cfg["env"][name] = value
+    return cfg
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, default=ROOT / "bench/results/2026-10-01-v100")
@@ -114,20 +132,7 @@ def main():
     save(out / "results.json", result)
     for model in args.models:
         source = json.loads((ROOT / f"strata-{model}.json").read_text())
-        # Only engine configuration is copied; authentication/local UI settings are omitted.
-        cfg = {k: source[k] for k in ("exe", "args", "cwd", "tokenizer", "model_name", "lib_dirs") if k in source}
-        cfg["args"] = [a for a in source["args"] if a != "--vision"] + ["--prompt-cache", "0"]
-        if args.workers is not None:
-            cfg["args"] += ["--pool-workers", str(args.workers)]
-        if args.vision == "gpu":
-            cfg["vision"] = source["vision"]
-            cfg["args"] += ["--vision"]
-        if args.exe:
-            cfg["exe"] = str(args.exe.resolve())
-        cfg["env"] = dict(source.get("env", {}))
-        for item in args.engine_env:
-            name, value = item.split("=", 1)
-            cfg["env"][name] = value
+        cfg = benchmark_config(source, args.workers, args.vision, args.exe, args.engine_env)
         cfg.update(host="127.0.0.1", port=args.port, log=str(out / f"{model}-engine.log"))
         config_path = out / f"{model}-config.json"
         save(config_path, cfg)
