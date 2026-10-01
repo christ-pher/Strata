@@ -26,6 +26,18 @@ class RuntimeRestoreTest(unittest.TestCase):
         tuning.assign(cfg, "usage", usage)
         self.assertEqual(cfg["args"], ["--pool-workers", "16"])
         self.assertEqual(cfg["env"]["STRATA_EXPERT_USAGE_DIR"], "old")
+    def test_vision_can_be_restored_without_undoing_workers(self):
+        cfg = {"args": ["--vision", "--spec", "4"], "vision": {"gpu": True, "exe": "encoder"}}
+        before = tuning.current(cfg, "vision")
+        tuning.assign(cfg, "vision", {"encoder": tuning.MISSING, "flag": False})
+        tuning.assign(cfg, "workers", "8")
+        self.assertNotIn("vision", cfg)
+        self.assertNotIn("--vision", cfg["args"])
+        tuning.assign(cfg, "vision", before)
+        self.assertEqual(cfg["vision"], {"gpu": True, "exe": "encoder"})
+        self.assertEqual(tuning.current(cfg, "workers"), "8")
+        self.assertIn("--vision", cfg["args"])
+
     def test_reject_duplicate_worker_arguments(self):
         with self.assertRaises(ValueError):
             tuning.current({"args": ["--pool-workers", "8", "--pool-workers", "16"]}, "workers")

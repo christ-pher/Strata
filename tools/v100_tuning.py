@@ -1,7 +1,7 @@
 """Apply one runtime tuning setting with a field-specific restore record.
 
 Saved model configs are local/ignored, so Git alone cannot restore their settings.
-Each operation changes only CPU workers or the expert-usage directory. Restoring one
+Each operation changes only CPU workers, vision, or the expert-usage directory. Restoring one
 operation preserves all unrelated settings, including changes made afterward.
 """
 from __future__ import annotations
@@ -15,6 +15,8 @@ MISSING = {"missing": True}
 
 
 def current(cfg, kind):
+    if kind == "vision":
+        return {"encoder": cfg.get("vision", MISSING), "flag": "--vision" in cfg["args"]}
     if kind == "usage":
         return cfg.get("env", {}).get("STRATA_EXPERT_USAGE_DIR", MISSING)
     args = cfg["args"]
@@ -25,6 +27,15 @@ def current(cfg, kind):
 
 
 def assign(cfg, kind, value):
+    if kind == "vision":
+        cfg["args"] = [arg for arg in cfg["args"] if arg != "--vision"]
+        if value["flag"]:
+            cfg["args"].append("--vision")
+        if value["encoder"] == MISSING:
+            cfg.pop("vision", None)
+        else:
+            cfg["vision"] = value["encoder"]
+        return
     if kind == "usage":
         if value == MISSING:
             cfg.get("env", {}).pop("STRATA_EXPERT_USAGE_DIR", None)
@@ -51,6 +62,7 @@ def main():
     actions = ap.add_mutually_exclusive_group(required=True)
     actions.add_argument("--workers", type=int)
     actions.add_argument("--usage-dir", help="empty string disables usage recording")
+    actions.add_argument("--text-only", action="store_true", help="disable vision with a restorable encoder configuration")
     actions.add_argument("--restore", type=Path)
     ap.add_argument("--restore-dir", type=Path, default=ROOT / "build/performance-restore-20261001")
     a = ap.parse_args()
@@ -70,8 +82,10 @@ def main():
         ap.error("workers must be positive")
     path = a.config.resolve()
     cfg = json.loads(path.read_text())
-    kind = "workers" if a.workers is not None else "usage"
+    kind = "workers" if a.workers is not None else "vision" if a.text_only else "usage"
     value = str(a.workers) if kind == "workers" else a.usage_dir
+    if kind == "vision":
+        value = {"encoder": MISSING, "flag": False}
     before = current(cfg, kind)
     if before == value:
         print("Setting already applied")
