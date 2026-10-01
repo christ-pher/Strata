@@ -1,0 +1,393 @@
+{
+  "started_utc": "2026-10-01T19:58:40.836575+00:00",
+  "source_commit": "060d0ac9eebe46ac2848c29b36e60b326e9f8d96",
+  "engine_sha256": "a7953b01738346a3efc1caaf353ee7e01d599d08f26ae15a9481b550fcf14770",
+  "engine_build": {
+    "source": "local",
+    "version": "0.1.32",
+    "archs": [
+      70
+    ],
+    "vision": "gpu",
+    "cuda_dirs": [
+      "/usr/local/cuda-12.8/bin",
+      "/usr/local/cuda-12.8/lib64"
+    ],
+    "src": "dccead2b77149a84",
+    "cpu_signature": "3fdc98038b8e0950",
+    "vision_src": "4d89409b228a1daa"
+  },
+  "method": {
+    "repeats": 2,
+    "max_tokens": 256,
+    "temperature": 0,
+    "thinking": false,
+    "prompt_cache": 0,
+    "prefill_ring": 8,
+    "warmup_max_tokens": 128,
+    "average": "arithmetic mean of measured request rates",
+    "peak": "maximum complete-request rate; not instantaneous"
+  },
+  "models": {
+    "orca-iq4_xs": {
+      "configuration": {
+        "exe": "/opt/engines/Strata/build/performance-restore-20261001/strata-baseline",
+        "args": [
+          "--pack",
+          "/opt/models/Strata/runtime/packs/orca-iq4_xs",
+          "--native",
+          "/opt/models/Strata/models/orca-iq4_xs/Qwen3.8-Flash-Next-Uncensored-IQ4_XS-00001-of-00003.gguf",
+          "--ple-gguf",
+          "/opt/models/Strata/models/orca-iq4_xs/Qwen3.8-Flash-Next-Uncensored-IQ4_XS-00001-of-00003.gguf",
+          "--expert-profile",
+          "/opt/engines/Strata/data/expert-profile.bin",
+          "--expert-cache",
+          "auto",
+          "--prefill",
+          "auto",
+          "--spec",
+          "4",
+          "--spec-min-p",
+          "0.5",
+          "--mtp",
+          "/opt/models/Strata/runtime/mtp/rt",
+          "--max-context",
+          "262144",
+          "--kv",
+          "int8",
+          "--kv-resident",
+          "32768",
+          "--ple-io",
+          "ram",
+          "--vram-reserve-mib",
+          "700",
+          "--prompt-cache",
+          "0",
+          "--pool-workers",
+          "8"
+        ],
+        "cwd": "/opt/engines/Strata",
+        "tokenizer": "/opt/models/Strata/runtime/packs/orca-iq4_xs/tokenizer",
+        "model_name": "orcarouter-qwen3.8-flash-next-uncensored-iq4_xs",
+        "lib_dirs": [
+          "/usr/local/cuda-12.8/lib64"
+        ],
+        "env": {
+          "STRATA_PREFILL_RING": "8"
+        },
+        "host": "127.0.0.1",
+        "port": 18080,
+        "log": "/opt/engines/Strata/bench/results/2026-10-01-perf-workers8-text/orca-iq4_xs-engine.log"
+      },
+      "requests": [
+        {
+          "case": "code_review",
+          "repeat": 1,
+          "wall_seconds": 7.210679178000646,
+          "response": {
+            "id": "chatcmpl-1265759f7a3e411892813d7f",
+            "object": "chat.completion",
+            "created": 1790884784,
+            "model": "orcarouter-qwen3.8-flash-next-uncensored-iq4_xs",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "### Executive Summary\n\nThe `serve/frontend.py` module acts as the **normalization and templating layer** for an LLM serving engine. Its primary responsibility is to bridge the gap between diverse client API formats (OpenAI Chat Completions, Anthropic Messages) and a specific, internal model interface that expects raw token IDs and a Jinja-rendered chat template. It handles the translation of high-level concepts like \"reasoning effort\" and \"thinking budgets\" into specific template variables, ensuring that the downstream engine receives a consistent, deterministic input string. Crucially, it isolates the complex, frequently changing logic of prompt formatting from the high-performance C++ engine boundary.\n\n---\n\n### Detailed Review\n\n#### 1. Responsibility Analysis\n\nThe module is structured around three core responsibilities:\n\n1.  **Template Rendering Fidelity**: The `ChatTemplate` class ensures that the Jinja template is rendered exactly as Hugging Face `transformers` would, using an `ImmutableSandboxedEnvironment`. This is critical for reproducibility and security, preventing template injection attacks while maintaining compatibility with standard model packs.\n2.  **Input Normalization**: Functions like `_text_of` and `effort_kwargs` normalize disparate client inputs. For example, OpenAI\u2019s `"
+                },
+                "finish_reason": "length"
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 1124,
+              "completion_tokens": 256,
+              "total_tokens": 1380,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 1124,
+              "prompt_ms": 2857.7,
+              "prompt_per_token_ms": 2.542,
+              "prompt_per_second": 393.3,
+              "predicted_n": 256,
+              "predicted_ms": 4335.9,
+              "predicted_per_token_ms": 16.937,
+              "predicted_per_second": 59.0,
+              "draft_n": 227,
+              "draft_n_accepted": 142
+            }
+          }
+        },
+        {
+          "case": "deployment_plan",
+          "repeat": 1,
+          "wall_seconds": 10.186423472999195,
+          "response": {
+            "id": "chatcmpl-7279ee18b63f4f7687bf20fd",
+            "object": "chat.completion",
+            "created": 1790884791,
+            "model": "orcarouter-qwen3.8-flash-next-uncensored-iq4_xs",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "# Deployment and Troubleshooting Plan: Strata on Volta GPU (Linux VM)\n\n## Executive Summary & Critical Constraints\n\n**Target Hardware:** Single NVIDIA Volta GPU (e.g., V100, Titan V), 94 GiB RAM, No AVX2 support.\n**Software:** Strata (Qwen3.8-Flash-Next).\n\n### \u26a0\ufe0f Critical Compatibility Warning\nThe provided documentation explicitly states: **\"Every card must be an RTX 20 series or newer with 8 GB or more.\"**\nVolta (Compute Capability 7.0) is **not** in the supported list (RTX 20/30/40/50). Furthermore, the Docker build defaults cover architectures 80, 86, 89, and 120.\n\n**Implication:** Standard installation will likely fail or run with severe performance penalties/instability because:\n1.  **AVX2 Missing:** The engine likely relies on AVX2 for CPU-side tensor operations (KV cache management, prompt processing). Without AVX2, CPU inference speed will drop significantly, potentially making the \"Read Prompt\" speed unusable for long contexts.\n2.  **"
+                },
+                "finish_reason": "length"
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 4226,
+              "completion_tokens": 256,
+              "total_tokens": 4482,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 4226,
+              "prompt_ms": 5744.6,
+              "prompt_per_token_ms": 1.359,
+              "prompt_per_second": 735.6,
+              "predicted_n": 256,
+              "predicted_ms": 4414.0,
+              "predicted_per_token_ms": 17.242,
+              "predicted_per_second": 58.0,
+              "draft_n": 215,
+              "draft_n_accepted": 142
+            }
+          }
+        },
+        {
+          "case": "architecture_analysis",
+          "repeat": 1,
+          "wall_seconds": 14.967976828000246,
+          "response": {
+            "id": "chatcmpl-2f6133d58a874c7b9c2c534c",
+            "object": "chat.completion",
+            "created": 1790884801,
+            "model": "orcarouter-qwen3.8-flash-next-uncensored-iq4_xs",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "# Technical Report: Strata Engine Architecture and V100 Performance Investigation\n\n## 1. Executive Summary\n\nThis report analyzes the architectural decisions of the Strata inference engine based on the provided design notes (`docs/DETAILS.md`). Strata employs a hybrid inference strategy combining GPU-accelerated attention with CPU-assisted Mixture-of-Experts (MoE) computation, optimized via speculative decoding (MTP) and advanced memory management (KV streaming, low-RAM modes).\n\nFollowing the analysis, a reproducible performance investigation is proposed for an NVIDIA V100 VM environment. This investigation aims to validate the engine's behavior on legacy hardware (Volta architecture) compared to the reference RTX 5070/3090 data, specifically testing the efficacy of CPU fallback and memory streaming under constrained VRAM conditions.\n\n---\n\n## 2. Architectural Analysis\n\n### 2.1 Expert Placement and CPU Fallback\nStrata utilizes a dynamic expert placement strategy to manage the massive parameter count of MoE models (e.g., Qwen3.8-Flash-Next) within limited VRAM.\n\n*   **Hybrid Execution:** The engine does not require all experts to reside in VRAM. It maintains a \"hot\""
+                },
+                "finish_reason": "length"
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 8348,
+              "completion_tokens": 256,
+              "total_tokens": 8604,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 8348,
+              "prompt_ms": 10703.3,
+              "prompt_per_token_ms": 1.282,
+              "prompt_per_second": 779.9,
+              "predicted_n": 256,
+              "predicted_ms": 4221.0,
+              "predicted_per_token_ms": 16.488,
+              "predicted_per_second": 60.6,
+              "draft_n": 213,
+              "draft_n_accepted": 144
+            }
+          }
+        },
+        {
+          "case": "code_review",
+          "repeat": 2,
+          "wall_seconds": 7.007547008999609,
+          "response": {
+            "id": "chatcmpl-ec637d194be3472db5a7f476",
+            "object": "chat.completion",
+            "created": 1790884816,
+            "model": "orcarouter-qwen3.8-flash-next-uncensored-iq4_xs",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "### Executive Summary\n\nThe `serve/frontend.py` module acts as the **protocol adapter and template renderer** for a local LLM serving engine. Its primary responsibility is to normalize heterogeneous API requests (OpenAI Chat Completions, Anthropic Messages) into a unified internal message format, render them using a specific Jinja2 chat template, and prepare the context for the underlying inference engine. Crucially, it decouples the \"text normalization\" layer from the \"tokenization/inference\" layer, allowing the heavy lifting to remain in C++ or a specialized engine while keeping the flexible, frequently changing template logic in Python.\n\nThe module is designed with a \"fail-fast\" philosophy for invalid inputs (e.g., unknown reasoning efforts) and a \"silent-drop\" philosophy for unsupported content types (e.g., images in text-only contexts). It explicitly handles the mapping of various client-side \"reasoning effort\" spellings to a canonical set of template kwargs.\n\n---\n\n### Detailed Review\n\n#### 1. Responsibilities and Architecture\n\n**Evidence:**\n*   **Normalization:** The `_text_of` function and `EFFORT` dictionary demonstrate the module's role in translating diverse client inputs (strings, lists of dicts, various boolean/string representations of \"off\" or \"high"
+                },
+                "finish_reason": "length"
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 1124,
+              "completion_tokens": 256,
+              "total_tokens": 1380,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 1124,
+              "prompt_ms": 2834.6,
+              "prompt_per_token_ms": 2.522,
+              "prompt_per_second": 396.5,
+              "predicted_n": 256,
+              "predicted_ms": 4158.6,
+              "predicted_per_token_ms": 16.245,
+              "predicted_per_second": 61.6,
+              "draft_n": 195,
+              "draft_n_accepted": 135
+            }
+          }
+        },
+        {
+          "case": "deployment_plan",
+          "repeat": 2,
+          "wall_seconds": 9.884774307999578,
+          "response": {
+            "id": "chatcmpl-0415567cd2c44083a8bdd64f",
+            "object": "chat.completion",
+            "created": 1790884823,
+            "model": "orcarouter-qwen3.8-flash-next-uncensored-iq4_xs",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "# Deployment and Troubleshooting Plan: Strata on Volta GPU (Linux VM)\n\n## Executive Summary & Critical Constraints\n\n**Target Hardware:** Single NVIDIA Volta GPU (e.g., V100, Titan V), 94 GiB RAM, No AVX2 support.\n**Software:** Strata (Qwen3.8-Flash-Next).\n\n### \u26a0\ufe0f Critical Compatibility Warning\nThe provided documentation explicitly states: **\"Every card must be an RTX 20 series or newer with 8 GB or more.\"**\nVolta (Compute Capability 7.0) is **older** than Turing (RTX 20 series, Compute Capability 7.5).\n\n*   **Risk:** The standard Strata installer/engine likely relies on CUDA kernels compiled for `sm_75` or higher. It may fail to load the model or crash immediately on a Volta card.\n*   **Workaround:** You must verify if the underlying engine (likely `llama.cpp` or a custom fork) supports `sm_70`. If the pre-compiled binaries do not support Volta, you **must** compile from source with `CUDA_ARCHITECTURES=70`.\n*   **AVX2"
+                },
+                "finish_reason": "length"
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 4226,
+              "completion_tokens": 256,
+              "total_tokens": 4482,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 4226,
+              "prompt_ms": 5656.4,
+              "prompt_per_token_ms": 1.338,
+              "prompt_per_second": 747.1,
+              "predicted_n": 256,
+              "predicted_ms": 4200.2,
+              "predicted_per_token_ms": 16.407,
+              "predicted_per_second": 60.9,
+              "draft_n": 223,
+              "draft_n_accepted": 149
+            }
+          }
+        },
+        {
+          "case": "architecture_analysis",
+          "repeat": 2,
+          "wall_seconds": 14.968892394999784,
+          "response": {
+            "id": "chatcmpl-cc88a0b4c26c4ca783bcdc98",
+            "object": "chat.completion",
+            "created": 1790884833,
+            "model": "orcarouter-qwen3.8-flash-next-uncensored-iq4_xs",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "# Technical Report: Strata Engine Architecture and V100 Performance Investigation\n\n## 1. Executive Summary\n\nThis report analyzes the architectural decisions of the Strata engine as described in `docs/DETAILS.md`, focusing on its hybrid CPU/GPU inference strategy for Mixture-of-Experts (MoE) models. It then proposes a rigorous, reproducible performance investigation for an NVIDIA V100 VM environment. The analysis highlights that Strata\u2019s performance is heavily dependent on PCIe bandwidth, CPU memory bandwidth, and expert residency strategies, rather than raw GPU compute power alone.\n\n## 2. Architectural Analysis\n\n### 2.1 Expert Placement and Memory Hierarchy\nStrata employs a tiered memory hierarchy to manage the massive parameter counts of MoE models (e.g., Qwen3.8-Flash-Next). The architecture distinguishes between three storage tiers:\n1.  **VRAM (GPU):** Holds the \"hot\" experts\u2014those most frequently accessed by the routing network. The size of this cache is limited by GPU VRAM (e.g., 12 GB on RTX 5070, 24 GB on RTX 3090).\n2.  **RAM (CPU):** Holds the \""
+                },
+                "finish_reason": "length"
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 8348,
+              "completion_tokens": 256,
+              "total_tokens": 8604,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 8348,
+              "prompt_ms": 10602.3,
+              "prompt_per_token_ms": 1.27,
+              "prompt_per_second": 787.4,
+              "predicted_n": 256,
+              "predicted_ms": 4321.8,
+              "predicted_per_token_ms": 16.882,
+              "predicted_per_second": 59.2,
+              "draft_n": 236,
+              "draft_n_accepted": 147
+            }
+          }
+        }
+      ],
+      "warmup": {
+        "response": {
+          "id": "chatcmpl-bc95995b3ba744dd98d214db",
+          "object": "chat.completion",
+          "created": 1790884781,
+          "model": "orcarouter-qwen3.8-flash-next-uncensored-iq4_xs",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "It is important to first clarify a common misconception in the premise of your question: **A standard Mixture-of-Experts (MoE) language model does not inherently \"share inference work\" between the GPU, System RAM, and CPU in the way that, for example, a hybrid CPU/GPU rendering pipeline might.**\n\nInstead, **MoE models primarily offload *memory* (weights) to System RAM or NVMe storage, while keeping *computation* (inference) on the GPU.** The CPU\u2019s role is largely orchestration and data movement, not primary computation.\n\nHere is a detailed, step-by-step explanation"
+              },
+              "finish_reason": "length"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 37,
+            "completion_tokens": 128,
+            "total_tokens": 165,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 37,
+            "prompt_ms": 429.8,
+            "prompt_per_token_ms": 11.616,
+            "prompt_per_second": 86.1,
+            "predicted_n": 128,
+            "predicted_ms": 2106.6,
+            "predicted_per_token_ms": 16.458,
+            "predicted_per_second": 60.8,
+            "draft_n": 107,
+            "draft_n_accepted": 74
+          }
+        },
+        "wall_seconds": 2.5517953540002054
+      },
+      "summary": {
+        "prompt": {
+          "average_tps": 639.9666666666667,
+          "peak_tps": 787.4,
+          "min_tps": 393.3,
+          "samples": 6
+        },
+        "decode": {
+          "average_tps": 59.88333333333333,
+          "peak_tps": 61.6,
+          "min_tps": 58.0,
+          "samples": 6
+        }
+      }
+    }
+  },
+  "finished_utc": "2026-10-01T20:00:55.075785+00:00"
+}

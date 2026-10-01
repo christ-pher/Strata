@@ -1,0 +1,18 @@
+strata generate: expert cache auto: 25.94 GiB free, 700 MiB reserved (+218 MiB for the draft head) -> 10101 slots
+strata generate: expert cache 10101 slots, 25.05 GiB of VRAM; policy is
+strata generate: 8 expert-pool workers + the host thread
+strata serve: prompt chunk auto: 8192 tokens
+strata serve: prompt 37 tokens = 0 reused + 37 read in 439 ms (84.3 tok/s), 128 generated in 2143 ms (59.7 tok/s), drafts accepted 74 of 107, 0 checkpoints
+strata serve: decode expert cache hit rate: 92.9% (71772 hits / 77220 lookups)
+strata serve: prompt 1124 tokens = 0 reused + 1124 read in 2867 ms (392.0 tok/s), 256 generated in 4359 ms (58.7 tok/s), drafts accepted 142 of 227, 0 checkpoints
+strata serve: decode expert cache hit rate: 94.5% (155291 hits / 164252 lookups)
+strata serve: prompt 4226 tokens = 0 reused + 4226 read in 5713 ms (739.8 tok/s), 256 generated in 4424 ms (57.9 tok/s), drafts accepted 142 of 215, 0 checkpoints
+strata serve: decode expert cache hit rate: 92.3% (144838 hits / 156915 lookups)
+strata serve: prompt 8348 tokens = 0 reused + 8348 read in 10676 ms (781.9 tok/s), 256 generated in 4186 ms (61.2 tok/s), drafts accepted 144 of 213, 0 checkpoints
+strata serve: decode expert cache hit rate: 95.2% (148409 hits / 155868 lookups)
+strata serve: prompt 1124 tokens = 0 reused + 1124 read in 2828 ms (397.4 tok/s), 256 generated in 4179 ms (61.3 tok/s), drafts accepted 135 of 195, 0 checkpoints
+strata serve: decode expert cache hit rate: 95.2% (143811 hits / 151098 lookups)
+strata serve: prompt 4226 tokens = 0 reused + 4226 read in 5633 ms (750.2 tok/s), 256 generated in 4105 ms (62.4 tok/s), drafts accepted 153 of 221, 0 checkpoints
+strata serve: decode expert cache hit rate: 93.3% (144350 hits / 154753 lookups)
+strata serve: prompt 8348 tokens = 0 reused + 8348 read in 10569 ms (789.8 tok/s), 256 generated in 4245 ms (60.3 tok/s), drafts accepted 151 of 226, 0 checkpoints
+strata serve: decode expert cache hit rate: 94.0% (149425 hits / 158911 lookups)

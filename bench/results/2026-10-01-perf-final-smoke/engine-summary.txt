@@ -1,0 +1,9 @@
+strata generate: expert cache auto: 24.57 GiB free, 700 MiB reserved (+218 MiB for the draft head) -> 9548 slots
+strata generate: expert cache 9548 slots, 23.67 GiB of VRAM; policy is
+strata usage: background decode/verification counts in /opt/engines/Strata/build/performance-restore-20261001/final-smoke-usage
+strata generate: 8 expert-pool workers + the host thread
+strata serve: prompt chunk auto: 8192 tokens
+strata serve: prompt 37 tokens = 0 reused + 37 read in 466 ms (79.4 tok/s), 128 generated in 1996 ms (64.1 tok/s), drafts accepted 78 of 101, 0 checkpoints
+strata serve: decode expert cache hit rate: 92.1% (66609 hits / 72318 lookups)
+strata serve: prompt 1124 tokens = 0 reused + 1124 read in 2958 ms (380.0 tok/s), 128 generated in 2142 ms (59.8 tok/s), drafts accepted 67 of 99, 0 checkpoints
+strata serve: decode expert cache hit rate: 93.7% (71562 hits / 76347 lookups)

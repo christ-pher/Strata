@@ -20,7 +20,7 @@ not an exact count of accepted output tokens. The normal expert cache still adap
 Counters occupy 192 KiB for 48 x 512 experts. At each completed/cancelled request, a copy goes to a background
 writer; one pending snapshot is retained even if storage is slow. Each engine session has its own cumulative
 `usage-*.tsv` file, atomically replaced on Linux. Storage is bounded per session, rather than growing per token.
-A crash can lose the current request or a pending snapshot; completed snapshots remain readable. Failed writes
+Abrupt termination can lose the current request or a pending snapshot and leave a `.tsv.tmp` file; completed `.tsv` snapshots remain readable. The tuning command ignores temporary files. Failed writes
 report to the engine log and do not stop inference. No profile is applied automatically.
 
 Periodically, preferably after collecting a range of practical tasks:
