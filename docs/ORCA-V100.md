@@ -22,7 +22,7 @@ Configuration: `strata-orca-iq3_xxs.json`; log: `strata-orca-iq3_xxs.log`.
 Defaults are 32K context, INT8 KV, 512-token prompt chunks, text input, MTP spec 4,
 and automatic GPU expert caching. The PLE table is in the first Orca shard.
 
-Weights: `/opt/models/Strata/models-download/orca-iq3_xxs/` (85.2 GB decimal).
+Weights: `/opt/models/Strata/models/orca-iq3_xxs/` (85.2 GB decimal).
 Compatibility pack: `/opt/models/Strata/runtime/packs/orca-iq3_xxs/` (about 1.5 GiB).
 The original IQ2_XS installation is retained. Orca's expert arena needs about
 49.8 GiB RAM, plus runtime buffers; the VM's 94 GiB is sufficient for one model.

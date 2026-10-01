@@ -15,4 +15,4 @@ esac
 export XDG_CONFIG_HOME="$STRATA_MODEL_HOME/runtime/user-config"
 export STRATA_PREFILL_RING=8
 exec ./setup.sh --family "$family" --model "$model" --data-dir "$STRATA_MODEL_HOME/runtime" \
-  --models-dir "$STRATA_MODEL_HOME/models-download" --context 32768 --kv int8 --vision none --host 0.0.0.0 --yes "$@"
+  --models-dir "$STRATA_MODEL_HOME/models" --context 32768 --kv int8 --vision none --host 0.0.0.0 --yes "$@"

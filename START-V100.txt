@@ -51,5 +51,5 @@ Ask for a compatibility check before downloading an unfamiliar release.
 
 This VM has enough RAM for the installer choices, but additional cached models
 need more disk space. IQ2_XS and Orca IQ3_XXS have been tested end to end on this machine.
-Models: /opt/models/Strata/models-download/   Packs and MTP: /opt/models/Strata/runtime/
+Models: /opt/models/Strata/models/   Packs and MTP: /opt/models/Strata/runtime/
 Runtime log: strata-iq2_xs.log   Validation: docs/V100-validation.md
