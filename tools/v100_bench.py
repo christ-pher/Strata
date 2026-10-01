@@ -80,6 +80,10 @@ def main():
     ap.add_argument("--prompts", type=Path, help="replay a saved prompts.json instead of generating excerpts")
     ap.add_argument("--models", nargs="+", default=["iq2_xs", "iq3_s"],
                     help="model configuration names, e.g. iq3_s orca-iq4_xs")
+    ap.add_argument("--workers", type=int, help="override CPU expert pool workers")
+    ap.add_argument("--vision", choices=["none", "gpu"], default="none")
+    ap.add_argument("--exe", type=Path, help="benchmark an isolated engine executable")
+    ap.add_argument("--engine-env", action="append", default=[], metavar="NAME=VALUE")
     args = ap.parse_args()
     if args.repeats < 1 or args.max_tokens < 128:
         ap.error("use at least one repeat and an output budget of at least 128 tokens")
@@ -87,7 +91,8 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     if (out / "results.json").exists():
         raise SystemExit("Results already exist; use another output directory.")
-    token_path = ROOT / "data/runtime/packs/iq2_xs/tokenizer"
+    first_config = json.loads((ROOT / f"strata-{args.models[0]}.json").read_text())
+    token_path = Path(first_config["tokenizer"])
     vocab = json.loads((token_path / "vocab.json").read_text())
     tokens = [""] * len(vocab)
     for token, index in vocab.items():
@@ -98,7 +103,7 @@ def main():
     save(out / "prompts.json", prompts)
     result = {"started_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
               "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
-              "engine_sha256": hashlib.sha256((ROOT / "engine/strata").read_bytes()).hexdigest(),
+              "engine_sha256": hashlib.sha256((args.exe or ROOT / "engine/strata").read_bytes()).hexdigest(),
               "engine_build": json.loads((ROOT / "engine/BUILD.json").read_text()),
               "method": {"repeats": args.repeats, "max_tokens": args.max_tokens,
                          "temperature": 0, "thinking": False, "prompt_cache": 0,
@@ -111,7 +116,18 @@ def main():
         source = json.loads((ROOT / f"strata-{model}.json").read_text())
         # Only engine configuration is copied; authentication/local UI settings are omitted.
         cfg = {k: source[k] for k in ("exe", "args", "cwd", "tokenizer", "model_name", "lib_dirs") if k in source}
-        cfg["args"] = list(cfg["args"]) + ["--prompt-cache", "0"]
+        cfg["args"] = [a for a in source["args"] if a != "--vision"] + ["--prompt-cache", "0"]
+        if args.workers is not None:
+            cfg["args"] += ["--pool-workers", str(args.workers)]
+        if args.vision == "gpu":
+            cfg["vision"] = source["vision"]
+            cfg["args"] += ["--vision"]
+        if args.exe:
+            cfg["exe"] = str(args.exe.resolve())
+        cfg["env"] = dict(source.get("env", {}))
+        for item in args.engine_env:
+            name, value = item.split("=", 1)
+            cfg["env"][name] = value
         cfg.update(host="127.0.0.1", port=args.port, log=str(out / f"{model}-engine.log"))
         config_path = out / f"{model}-config.json"
         save(config_path, cfg)
