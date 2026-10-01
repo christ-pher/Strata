@@ -1018,6 +1018,8 @@ endif()
 
 # Numerical regression for the native and pre-Ampere BF16 prefill paths.
 if(STRATA_ENABLE_CUDA AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/cuda/bf16_gemm.cpp")
+  add_executable(bf16_gemm_bench tests/cuda/bf16_gemm_bench.cpp)
+  target_link_libraries(bf16_gemm_bench PRIVATE strata_prefill CUDA::cudart)
   add_executable(bf16_gemm_test tests/cuda/bf16_gemm.cpp)
   target_link_libraries(bf16_gemm_test PRIVATE strata_prefill CUDA::cudart)
   add_test(NAME bf16_gemm_test COMMAND bf16_gemm_test)

@@ -418,12 +418,23 @@ void Gemm::bf16(const uint16_t* X, const uint16_t* W, float* Y, int64_t T, int64
                 float* wf = fp32_ + rows * K;
                 const int64_t columns = (capacity - rows * K) / K;
                 const float alpha = 1.0f;
+                // Keep the same tile shapes and 64 MiB allocation. If W fits in the existing weight
+                // portion, expand it once per call instead of once per token tile. Never cache across
+                // calls: some callers overwrite the dequantization scratch at the same address.
+                static const bool reuse_enabled = [] {
+                    const char* value = std::getenv("STRATA_BF16_REUSE_W");
+                    return !value || value[0] != '0';
+                }();
+                const bool reuse_weights = reuse_enabled && N <= columns;
+                if (reuse_weights)
+                    bf16_expand<<<(unsigned) ((N * K + 255) / 256), 256, 0, (cudaStream_t) stream_>>>(W, wf, N * K);
                 for (int64_t t0 = 0; t0 < T; t0 += rows) {
                     const int64_t t = std::min(rows, T - t0);
                     bf16_expand<<<(unsigned) ((t * K + 255) / 256), 256, 0, (cudaStream_t) stream_>>>(X + t0 * K, xf, t * K);
                     for (int64_t n0 = 0; n0 < N; n0 += columns) {
                         const int64_t n = std::min(columns, N - n0);
-                        bf16_expand<<<(unsigned) ((n * K + 255) / 256), 256, 0, (cudaStream_t) stream_>>>(W + n0 * K, wf, n * K);
+                        if (!reuse_weights)
+                            bf16_expand<<<(unsigned) ((n * K + 255) / 256), 256, 0, (cudaStream_t) stream_>>>(W + n0 * K, wf, n * K);
                         ck(cublasSgemm((cublasHandle_t) handle_, CUBLAS_OP_T, CUBLAS_OP_N, (int) n, (int) t, (int) K,
                                       &alpha, wf, (int) K, xf, (int) K, &beta, Y + t0 * ldy + n0, (int) ldy),
                            "BF16 via SGEMM");
