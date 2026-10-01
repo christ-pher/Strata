@@ -82,6 +82,17 @@ Common commands:
 ./run-v100.sh coder                        # pruned coding model, IQ1_M
 ```
 
+**Unsloth's 4-bit UD-Q4_K_XL** (experimental) is the fourth version in setup's menu (`--family unsloth`): the closest
+to the full model, but a 111 GB download whose 77 GB of experts do not fit in RAM. Strata keeps your RAM minus 24 GB
+of them in RAM and reads the rest from the SSD while it answers: 7-8.5 tokens/s on a 64 GB PC with a 12 GB GPU, several
+times slower than the sizes above, and long prompts are slow. It needs 48 GB of RAM or more, an NVMe SSD and one
+NVIDIA GPU (no images yet). Details and measurements: [UD-Q4_K_XL](docs/UNSLOTH_Q4.md).
+
+An **AMD Radeon RX 7900 XT / XTX, RX 9070 / 9070 XT or Radeon AI PRO R9700 on Linux** works too (experimental; the
+RX 7800 XT / 7700 XT and RX 9060 XT were validated by their owners; the RX 6800 / 6900 series, gfx1030, is community-reported):
+`./setup.sh --backend hip`, chosen by itself on a PC with no NVIDIA card Strata can use. It installs ROCm without sudo
+and compiles the engine (no images yet; several cards with `--gpus`). Details: [AMD HIP](docs/AMD_HIP.md).
+
 ## Model choices
 
 | Choice | Launcher | Notes |
@@ -118,7 +129,7 @@ The shared installer downloads Orca directly and applies the documented BF16 com
 - **Anthropic-compatible endpoint:** `http://<vm-address>:8080/v1/messages`.
 - **Terminal chat:** `.venv/bin/python chat.py`.
 
-The browser includes chat and live monitoring. Thinking can be off, low, medium, or high; reasoning tokens count toward an API request's output budget. The V100 launcher disables vision by default; image support is not part of the current VM validation. Requests are served one at a time.
+The browser includes chat and live monitoring. Thinking can be off, low, medium, or high; reasoning tokens count toward an API request's output budget. The V100 launcher disables vision by default; Orca vision can be prepared with `--prepare-vision gpu` and enabled with `--vision gpu`; see [Orca vision](docs/ORCA.md#optional-vision-on-the-v100). Requests are served one at a time.
 
 Example from inside the VM, with thinking disabled:
 

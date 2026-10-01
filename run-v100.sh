@@ -6,6 +6,7 @@ export STRATA_MODEL_HOME="${STRATA_MODEL_HOME:-/opt/models/Strata}"
 export STRATA_UNIFIED_LAUNCHER=1
 export XDG_CONFIG_HOME="$STRATA_MODEL_HOME/runtime/user-config"
 export STRATA_PREFILL_RING=8
+export STRATA_EXPERIMENTAL_SM60=1
 model=${1:-IQ2_XS}
 if [ "$#" -gt 0 ]; then shift; fi
 family=qwen

@@ -103,3 +103,22 @@ does not establish this fine-tune's speed or accuracy.
   PID stayed unchanged. These are smoke tests, not a quality benchmark or a full-context stress test.
 - With the configuration above, a 111-token explanation generated at 77.7 tokens/s (engine decode timing);
   total request time was 1.77 seconds. This single short measurement is not a general throughput claim.
+
+## Optional vision on the V100
+
+The unified launcher accepts `--vision gpu` or `--vision cpu` for installed Orca
+IQ3_XXS and IQ4_XS models. It uses the original Qwen BF16 vision encoder/projector;
+the language weights and saved context settings are reused without repacking.
+Vision is off on a normal launcher invocation. Enabling it updates the saved
+configuration; starting with `--vision none` removes the vision configuration.
+
+```sh
+./run-v100.sh orca-iq4_xs --prepare-vision gpu  # download/build only; no server or config changes
+./run-v100.sh orca-iq4_xs --vision gpu         # enable images and start
+./run-v100.sh orca-iq4_xs --vision none        # return to text-only
+```
+
+Use `orca` in place of `orca-iq4_xs` for IQ3_XXS. Stop the existing server before
+starting another. The GPU encoder consumes VRAM and reduces the expert cache;
+CPU encoding is slower. Images use OpenAI `image_url` parts or Anthropic image
+blocks, as described in [Images](DETAILS.md#images-vision).

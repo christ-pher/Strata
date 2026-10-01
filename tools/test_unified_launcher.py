@@ -41,6 +41,26 @@ class UnifiedLauncher(unittest.TestCase):
             self.assertEqual(start.call_args.args[0], selected)
             download.assert_not_called()
 
+    def test_prepare_vision_preserves_config(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = Path(td) / "strata-orca-iq4_xs.json"
+            original = {"args": ["--native", "/model.gguf", "--max-context", "262144"], "gpu": 0}
+            cfg.write_text(json.dumps(original))
+            with mock.patch.object(setup, "download"), \
+                 mock.patch.object(setup, "gpus", return_value=[{"index": 0, "arch": "70"}]), \
+                 mock.patch.object(setup, "get_llama_cpp", return_value=Path("/llama")), \
+                 mock.patch.object(setup, "build_engine", return_value=Path("/engine")), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                setup.configure_existing_vision(cfg, "orca", "gpu", td, True, prepare_only=True)
+                self.assertEqual(json.loads(cfg.read_text()), original)
+                setup.configure_existing_vision(cfg, "orca", "gpu", td, True)
+                enabled = json.loads(cfg.read_text())
+                self.assertTrue(enabled["vision"]["gpu"])
+                self.assertIn("--vision", enabled["args"])
+                self.assertEqual(enabled["args"][enabled["args"].index("--max-context") + 1], "262144")
+                setup.configure_existing_vision(cfg, "orca", "none", td, True)
+                self.assertEqual(json.loads(cfg.read_text()), original)
+
     def test_shell_routes_models_and_forwards_options(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
