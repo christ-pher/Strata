@@ -122,3 +122,11 @@ Use `orca` in place of `orca-iq4_xs` for IQ3_XXS. Stop the existing server befor
 starting another. The GPU encoder consumes VRAM and reduces the expert cache;
 CPU encoding is slower. Images use OpenAI `image_url` parts or Anthropic image
 blocks, as described in [Images](DETAILS.md#images-vision).
+
+Validated on 2026-10-01 with upstream v0.1.32, Orca IQ4_XS, CUDA 12.8,
+and the V100-class sm70 GPU. The GPU encoder initialized and an OpenAI API image
+request containing a red square returned “Red” (147 prompt tokens, 2 output
+tokens). This is an image-input smoke test, not a general vision quality benchmark.
+The normal Orca configuration remains text-only; the projector and helper are
+installed for later use. Setup, launcher/pack, and server regression suites passed
+195 tests in total.
