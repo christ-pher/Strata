@@ -39,3 +39,24 @@ IQ3_XXS, IQ3_S and Coder IQ1_M, downloading their weights when selected.
 Orca IQ3_XXS was subsequently installed and tested with a PLE loader correction.
 The original IQ2_XS API smoke test also passed with that correction. See
 [Orca V100 validation](ORCA-V100.md).
+
+## Upstream 0.1.30 update — 2026-10-01
+
+Merged upstream `30ec18e` while retaining the local Volta, scalar CPU and
+compatibility PLE adaptations. Model downloads and generated runtime assets
+were moved to `/opt/models/Strata`, with ignored compatibility symlinks at the
+old paths. The V100 launchers and installed IQ2_XS/IQ3_S configurations use the
+external paths directly.
+
+- Full CUDA 12.8 build for sm70 passed.
+- All eight focused GPU/scalar numerical checks passed.
+- Server/tokenizer regression suite: 80 tests, two platform skips, passed.
+- Setup rope suite: 19 tests passed; sm70 acceptance, sm60 rejection and CUDA 12
+  selection checked separately.
+- A temporary localhost API server loaded the migrated IQ3_S model with INT8
+  KV, 262,144 context and 32,768 resident KV cells. With thinking disabled,
+  `17 + 25` returned exactly `42` (three output tokens); the server was stopped.
+
+The original local source is retained on `backup/v100-before-upstream-20261001`.
+The previous engine binary and build metadata are retained outside Git at
+`/opt/models/Strata/backups/engine-0.1.27/`.

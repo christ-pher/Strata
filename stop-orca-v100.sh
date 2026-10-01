@@ -1,10 +1,11 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")"
+export STRATA_MODEL_HOME="${STRATA_MODEL_HOME:-/opt/models/Strata}"
 exec .venv/bin/python - <<'PY'
 import os,signal
 from pathlib import Path
-pidfile=Path('data/runtime/orca-server.pid')
+pidfile=Path(os.environ['STRATA_MODEL_HOME'])/'runtime/orca-server.pid'
 if not pidfile.exists():
     raise SystemExit('No Orca launcher PID is recorded.')
 pid=int(pidfile.read_text().strip())
