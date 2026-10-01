@@ -1,0 +1,8 @@
+{
+  "config": "/opt/engines/Strata/strata-orca-iq4_xs.json",
+  "kind": "usage",
+  "before": {
+    "missing": true
+  },
+  "after": "/opt/engines/Strata/logs/expert-usage/orca-iq4_xs"
+}

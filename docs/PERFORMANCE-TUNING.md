@@ -7,6 +7,11 @@ Changes are on `perf/v100-20261001`; each optimization is committed separately f
 ## Background expert usage
 
 Set `STRATA_EXPERT_USAGE_DIR` to a directory dedicated to one model/quantization. Empty/unset disables recording.
+For persistent recording, set it in the saved config's `env` object using `tools/v100_tuning.py --usage-dir`.
+Config values take precedence over inherited environment variables. The current Orca config is enabled after
+validation; other models remain opt-in. Each setting gets a field-specific restore record under the ignored
+build directory, so restoring recording does not undo a later worker or vision change.
+
 The engine counts main-model decode/verification expert selections already delivered to the CPU pool, including
 GPU hits and rejected verification positions. It does not add device transfers or capture prompts, replies,
 token IDs, batched prompt routing, or the separate MTP draft layer. This is a workload frequency estimate,
