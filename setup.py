@@ -999,6 +999,7 @@ def update_installed_engine(url_base) -> None:
     vision = meta.get("vision") or "none"
     if local:                                          # compiled here: is it older than the source (a git pull)?
         if meta.get("src") == source_hash(ENGINE_SOURCES) and \
+                meta.get("cpu_signature") == native_cpu_signature() and \
                 (vision == "none" or meta.get("vision_src") == source_hash(VISION_SOURCES)):
             return
     elif ver >= MIN_ENGINE:
@@ -1161,6 +1162,28 @@ def source_hash(parts) -> str:
     return h.hexdigest()[:16]
 
 
+def native_cpu_signature() -> str:
+    """Identify the CPU used by ggml's -march=native build, including VM feature changes."""
+    identity = [platform.machine(), *cpu_info()]
+    if not WIN:
+        try:
+            text = Path("/proc/cpuinfo").read_text()
+            match = re.search(r"^flags\s*:\s*(.*)$", text, re.M)
+            if match:
+                identity.append(sorted(set(match.group(1).split())))
+        except OSError:
+            pass
+    return hashlib.sha256(json.dumps(identity).encode()).hexdigest()[:16]
+
+
+def invalidate_native_cpu_objects(build_dir: Path) -> None:
+    """Ninja cannot see a changed CPU behind an unchanged -march=native command."""
+    for directory in build_dir.glob("ggml/**/CMakeFiles/ggml-cpu.dir"):
+        for obj in directory.rglob("*"):
+            if obj.is_file() and obj.suffix in (".o", ".obj"):
+                obj.unlink()
+
+
 def build_engine(gpu, vision, yes, llama) -> Path:
     """Compile the engine (and, for images, the encoder) for this GPU; the results go to engine/.  A compiled
     engine whose source files changed since (a `git pull`) is compiled again: only the changed files, a few minutes."""
@@ -1176,7 +1199,9 @@ def build_engine(gpu, vision, yes, llama) -> Path:
     # a card the engine has no code for (a GPU added with --gpus, #128) needs a compile even when the source is the
     # same; the compile keeps the generations it was built for
     new_arch = local and not set(archs) <= built
-    engine_ok = local and (eng / EXE).exists() and meta.get("src") == src and not new_arch
+    cpu_signature = native_cpu_signature()
+    cpu_changed = local and meta.get("cpu_signature") != cpu_signature
+    engine_ok = local and (eng / EXE).exists() and meta.get("src") == src and not new_arch and not cpu_changed
     vision_ok = not want_vision or ((eng / VEXE).exists() and (not local or meta.get("vision_src") == vsrc))
     if engine_ok and vision_ok:
         ok("engine already built for this PC")
@@ -1187,13 +1212,26 @@ def build_engine(gpu, vision, yes, llama) -> Path:
     host_def = cuda_host_compiler(find_nvcc(12 if min(archs) < 75 else None)[1])
     cuda_archs = ";".join(str(x) for x in archs)
     if not engine_ok:
+        if cpu_changed:
+            invalidate_native_cpu_objects(ROOT / "build")
         say("  Compiling the engine for " + ", ".join(f"sm_{x}" for x in archs) + " (a card it had no code for; "
             "10-20 minutes, once) ..." if new_arch else
+            "  CPU features changed or were not recorded: rebuilding the native CPU backend ..." if cpu_changed else
             "  The engine's source changed: compiling it again (only what changed, a few minutes) ..."
             if local and (eng / EXE).exists() else "  Compiling the Strata engine for your GPU (10-20 minutes, once) ...")
-        cmake_build(ROOT, ROOT / "build", "strata",
-                    ["-DSTRATA_ENABLE_CUDA=ON", "-DSTRATA_BUILD_TESTS=OFF", f"-DCMAKE_CUDA_ARCHITECTURES={cuda_archs}",
-                     f"-DCMAKE_CUDA_COMPILER={nvcc}", f"-DSTRATA_GGML_DIR={llama}", *host_def], vcvars, "build-strata.bat")
+        # Compiler caches can also retain objects from the old -march=native CPU.
+        cache_disable = os.environ.get("CCACHE_DISABLE")
+        try:
+            if cpu_changed:
+                os.environ["CCACHE_DISABLE"] = "1"
+            cmake_build(ROOT, ROOT / "build", "strata",
+                        ["-DSTRATA_ENABLE_CUDA=ON", "-DSTRATA_BUILD_TESTS=OFF", f"-DCMAKE_CUDA_ARCHITECTURES={cuda_archs}",
+                         f"-DCMAKE_CUDA_COMPILER={nvcc}", f"-DSTRATA_GGML_DIR={llama}", *host_def], vcvars, "build-strata.bat")
+        finally:
+            if cache_disable is None:
+                os.environ.pop("CCACHE_DISABLE", None)
+            else:
+                os.environ["CCACHE_DISABLE"] = cache_disable
         shutil.copy2(ROOT / "build" / EXE, eng / EXE)
     if not vision_ok:
         say("  Compiling the image encoder" + (" with CUDA (10-20 minutes, once) ..." if vision == "gpu" else " ..."))
@@ -1206,7 +1244,8 @@ def build_engine(gpu, vision, yes, llama) -> Path:
     dirs = [str(d) for d in (bindir, bindir / "x64", bindir.parent / "lib64") if d.is_dir()]
     stamp.write_text(json.dumps({"source": "local", "version": source_version(), "archs": archs,
                                  "vision": vision,
-                                 "cuda_dirs": dirs, "src": src, "vision_src": vsrc if want_vision else None}, indent=1))
+                                 "cuda_dirs": dirs, "src": src, "cpu_signature": cpu_signature,
+                                 "vision_src": vsrc if want_vision else None}, indent=1))
     ok(f"engine compiled: {eng / EXE}")
     return eng
 

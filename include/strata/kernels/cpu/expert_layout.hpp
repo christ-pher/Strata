@@ -26,6 +26,8 @@ struct ExpertLayout {
     /// Per layer, the GGUF file (a name beside the --native shard) that holds its experts when the model's
     /// shards split the layers (Swift's GGUFs: layers 13-47 in shard 2).  Empty = the --native shard itself.
     std::vector<std::string> gguf_file;
+    /// v4: individual gate/up/down shard names (3 x n_layers); empty means --native.
+    std::vector<std::string> gguf_role_file;
     uint64_t max_blob = BLOB;
     uint64_t total = 0;                   ///< experts.bin size
 

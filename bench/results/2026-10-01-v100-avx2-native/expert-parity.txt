@@ -1,0 +1,14 @@
+          iq3_xxs avx2 gate rows vs ggml vec_dot: rel 3.26e-08
+          gate+up one token one thread: avx2 748 us (1.68 GB/s), ggml 447 us (2.81 GB/s)
+          gate+up 3 tokens one thread: avx2 865 us vs ggml 3 x 447 us
+          width invariance (1 vs 3 tokens): gate/up 0, down 0 rows differ
+          iq4_nl AVX-2 multi-token down vs ggml down: rel 1.01e-07
+          down 3 tokens one thread: avx2 252 us (3.66 GB/s) vs ggml 340 us (2.71 GB/s)
+layer  0  iq3_xxs /iq4_nl  blob  2176000  cpu rel 1.30e-02  gpu rel 1.14e-02  cpu-gpu 1.39e-02  ok
+          iq2_s avx2 gate rows vs ggml vec_dot: rel 2.94e-08
+          gate+up one token one thread: avx2 411 us (2.55 GB/s), ggml 282 us (3.73 GB/s)
+          gate+up 3 tokens one thread: avx2 537 us vs ggml 3 x 282 us
+          width invariance (1 vs 3 tokens): gate/up 0, down 0 rows differ
+          q2_0 AVX-2 down vs ggml down: rel 2.25e-04
+layer  1  iq2_s   /q2_0    blob  1510400  cpu rel 1.31e-02  gpu rel 1.15e-02  cpu-gpu 1.51e-02  ok
+native_expert_parity: 0 failures

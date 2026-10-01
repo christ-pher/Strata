@@ -111,6 +111,30 @@ class CompatibilityTests(unittest.TestCase):
                      "per_layer_token_embd.weight", "blk.0.attn_qkv.weight"]:
             self.assertFalse(iq_pack.needs_bf16(name, "IQ3_XXS"))
 
+    def test_roles_in_separate_shards(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            sources = [root / f"model-{i:05d}-of-00003.gguf" for i in range(1, 4)]
+            for path, role in zip(sources, ("gate", "up", "down")):
+                tensors = [(f"blk.0.ffn_{role}_exps.weight", np.ones((512, 2, 32), np.float32), Q.Q8_0)]
+                if role == "gate":
+                    tensors.append(("blk.0.ffn_gate_inp.weight", np.ones((512, 32), np.float32), Q.BF16))
+                write_gguf(path, tensors)
+            out = root / "pack"
+            (out / "tokenizer").mkdir(parents=True)
+            for name in ("vocab.json", "chat_template.jinja"):
+                (out / "tokenizer" / name).touch()
+            with patch.object(sys, "argv", ["iq_pack.py", "--gguf", str(sources[0]), "--out", str(out)]):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(iq_pack.main(), 0)
+            line = (out / "native_experts.txt").read_text().splitlines()[1].split()
+            self.assertEqual(line[8:], ["-", sources[1].name, sources[2].name])
+            model = iq_pack.Model(sources[0])
+            for r, role in enumerate(("gate", "up", "down")):
+                gg, tensor, _, _ = model.where[f"blk.0.ffn_{role}_exps.weight"]
+                self.assertEqual(int(line[5 + r]), gg.data_start + tensor.offset)
+            self.assertFalse((out / "experts.bin").exists())
+
     def test_snapshot_symlinks_keep_split_discovery(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             root = Path(tmp)

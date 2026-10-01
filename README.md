@@ -1,6 +1,6 @@
 # Strata for Tesla V100 / Volta
 
-A personal fork of [Niko1221/Strata](https://github.com/Niko1221/Strata), adapted to run **Qwen3.8-Flash-Next on a 32 GiB Volta GPU inside a Linux VM**, including a guest CPU without AVX2.
+A personal fork of [Niko1221/Strata](https://github.com/Niko1221/Strata), adapted to run **Qwen3.8-Flash-Next on a 32 GiB Volta GPU inside a Linux VM**, with EPYC 7402 host CPU passthrough (AVX2, FMA and F16C).
 
 This fork is based on **upstream 0.1.30 (`30ec18e`)**. It keeps Strata's browser UI, OpenAI-compatible and Anthropic-compatible APIs, expert caching, and MTP speculative decoding, with local changes for the V100 and this VM's CPU capabilities.
 
@@ -11,8 +11,8 @@ The unchanged upstream README is preserved in [README.original.md](README.origin
 - **Volta / sm70 support:** build-time and runtime GPU checks accept compute capability 7.0, and setup recognizes the V100.
 - **CUDA 12 selection:** setup selects a CUDA 12 toolkit for Volta, even when CUDA 13 is also installed. CUDA 13 cannot compile this GPU target. On Linux, setup selects a compatible GCC version when the default compiler is too new for the toolkit.
 - **BF16 prompt projections on older GPUs:** BF16 inputs expand to FP32 for tiled SGEMM, with a SIMT path for narrow products. This lets the V100 execute projections that use newer GPU features upstream.
-- **CPU fallback without AVX2:** native expert dispatch checks the guest's actual CPU capabilities and uses scalar kernels when needed. AVX2 lookup-table initialization happens only on the supported path.
-- **Orca compatibility:** the PLE loader retains the packed BF16 key produced by the compatibility conversion. Dedicated scripts prepare and launch Orca IQ3_XXS.
+- **CPU feature handling:** expert dispatch selects AVX2 automatically on this EPYC VM and retains scalar fallback for guests without SIMD. Setup detects CPU changes and rebuilds native ggml objects with compiler-cache reuse bypassed.
+- **Orca compatibility:** the PLE loader retains the packed BF16 key produced by the compatibility conversion. Dedicated scripts prepare and launch Orca IQ3_XXS and IQ4_XS, including experts split across GGUF shards.
 - **External model storage:** weights, prepared packs, MTP assets, and local settings live under `/opt/models/Strata`, outside the source checkout.
 - **V100 launchers and numerical checks:** reproducible launch defaults plus BF16 GEMM and scalar expert regression tests.
 
@@ -26,9 +26,9 @@ Guest-visible configuration checked on 2026-10-01:
 | --- | --- |
 | Operating system | Ubuntu 24.04.5 LTS, x86_64 |
 | Virtualization | QEMU/KVM |
-| CPU | 24 vCPUs; guest reports `QEMU Virtual CPU version 2.5+` |
-| CPU instruction sets | No AVX2 or AVX-512 exposed to the guest |
-| System memory | Approximately 94 GiB usable RAM |
+| CPU | 24 vCPUs; guest reports `AMD EPYC 7402 24-Core Processor` |
+| CPU instruction sets | AVX2, FMA and F16C exposed; no AVX-512 |
+| System memory | 160 GiB assigned, approximately 157 GiB usable RAM |
 | Swap | 8 GiB |
 | GPU | Tesla PG500-216, Volta / V100-class, compute capability 7.0 |
 | GPU memory | 32,768 MiB (32 GiB) |
@@ -91,6 +91,7 @@ Common commands:
 | Coder IQ1_M | `./run-v100.sh coder` | Pruned, coding-focused model |
 | Swift 1.5 | Append `--family swift` | Q2_0, IQ2_XS, or IQ3_XXS |
 | Orca IQ3_XXS | `./run-v100.sh orca` | Separate compatibility preparation; see below |
+| Orca IQ4_XS | `./run-v100.sh orca-iq4_xs` | Validated at 262K configured context; see [IQ4_XS notes](docs/ORCA-IQ4-XS.md) |
 
 The launcher selects the supported repositories and shards. A matching quantization name or `.gguf` extension alone does not establish compatibility: the engine expects the supported `qwen4exp` architecture and tensor formats. Models for a different Qwen architecture and Safetensors/AWQ/GPTQ/EXL2 files are not direct replacements.
 
@@ -105,7 +106,7 @@ Plan for both model shards, generated packs, MTP assets, and runtime memory. IQ2
 ./stop-orca-v100.sh
 ```
 
-The Orca scripts require the `hf` CLI and use the documented BF16 compatibility conversion. Orca has historical validation on the previous local build; the latest upstream merge's real-model smoke check used original IQ3_S. Other Orca quantizations are not covered by that validation. See [Orca V100 notes](docs/ORCA-V100.md).
+The Orca scripts require the `hf` CLI and use the documented BF16 compatibility conversion. To prepare or launch IQ4_XS, pass `IQ4_XS` to the setup or run script. IQ4_XS passed actual expert parity and a saved-prompt benchmark on the current AVX2 build. See [IQ4_XS validation](docs/ORCA-IQ4-XS.md) and the [historical Orca V100 notes](docs/ORCA-V100.md).
 
 ## Browser and API usage
 
@@ -160,6 +161,8 @@ Commit local work before merging. On the existing VM, `origin` already points to
 
 ## Personal benchmarks and validation
 
+After EPYC host CPU passthrough and a native CPU rebuild, replaying the same saved workload measured **58.0 tokens/s for IQ2_XS (+3.7%)** and **56.9 tokens/s for IQ3_S (+19.8%)** average decode. Prompt throughput was essentially unchanged. See the [AVX2 comparison and validation](bench/results/2026-10-01-v100-avx2-native/README.md). The table below preserves the earlier no-AVX2 baseline.
+
 Measured on **2026-10-01**, using this VM's 32 GiB Volta GPU, 24 vCPUs without AVX2, approximately 94 GiB RAM, and the fork's **0.1.30** engine built with CUDA 12.8.
 
 | Model | Prompt average (tokens/s) | Prompt peak (tokens/s) | Decode average (tokens/s) | Decode peak (tokens/s) |
@@ -180,7 +183,7 @@ The update also passed a full sm70 build, eight focused GPU/scalar numerical che
 ## Troubleshooting and technical details
 
 - **Compile fails for sm70:** check that setup is using CUDA 12 rather than CUDA 13. See [V100 build instructions](docs/V100.md).
-- **Slow CPU expert execution:** this guest has no AVX2. The scalar path keeps it functional, but changing guest CPU exposure can change performance.
+- **CPU expert execution:** host CPU passthrough exposes AVX2, FMA and F16C, enabling automatic SIMD dispatch. Historical benchmarks below used the earlier generic guest CPU without AVX2.
 - **Startup uses substantial RAM:** close other workloads or select a smaller model; watch available RAM and swapping.
 - **Port 8080 is occupied:** stop the existing server before switching models.
 - **Download or preparation interrupted:** rerun the same launcher to resume or reuse completed work.

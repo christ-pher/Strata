@@ -13,7 +13,8 @@ try:
     command=Path(f'/proc/{pid}/cmdline').read_bytes()
 except FileNotFoundError:
     pidfile.unlink(); print('Orca is already stopped.'); raise SystemExit(0)
-if b'serve.server' not in command or b'strata-orca-iq3_xxs.json' not in command:
+if b'serve.server' not in command or not any(name in command for name in
+        (b'strata-orca-iq3_xxs.json', b'strata-orca-iq4_xs.json')):
     raise SystemExit('Recorded PID is not the Orca server; no process was stopped.')
 children=Path(f'/proc/{pid}/task/{pid}/children').read_text().split()
 engine=str(Path.cwd()/'engine/strata').encode()

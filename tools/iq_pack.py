@@ -312,19 +312,19 @@ def main() -> int:
     # shards, #171) left a partial native_experts.txt that the next setup run took as a finished pack (#172)
     tmp = out / "native_experts.txt.tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as fo:
-        fo.write("# strata native experts v3: layer gu_type d_type offset blob_bytes gate_off up_off down_off [shard] "
+        fo.write("# strata native experts v4: layer gu_type d_type offset blob_bytes gate_off up_off down_off [shard | gate_shard up_shard down_shard] "
                  "(n_expert %d, total %d; absolute offsets in %s, or in the named shard beside it)\n"
                  % (n_expert, offset, src.name))
         for l, gt, dt, off, blob, ts in layout:
             ws = [model.where[t.name] for t in ts]
-            if len({w[3] for w in ws}) != 1:
-                print("layer %d: its gate/up/down tensors are in different shards" % l)
-                fo.close()
-                tmp.unlink()
-                return 1
-            gg, shard = ws[0][0], ws[0][3]
-            line = "%d %d %d %d %d %d %d %d" % (l, gt, dt, off, blob, *[gg.data_start + t.offset for t in ts])
-            fo.write(line + ("" if shard == src else " " + shard.name) + "\n")
+            shard = ws[0][3]
+            line = "%d %d %d %d %d %d %d %d" % (l, gt, dt, off, blob,
+                                                        *[w[0].data_start + t.offset for w, t in zip(ws, ts)])
+            if len({w[3] for w in ws}) == 1:
+                suffix = "" if shard == src else " " + shard.name
+            else:
+                suffix = " " + " ".join("-" if w[3] == src else w[3].name for w in ws)
+            fo.write(line + suffix + "\n")
     tmp.replace(out / "native_experts.txt")
     if a.skip_experts or not a.experts_bin:
         if (out / "experts.bin").exists() and not a.experts_bin:

@@ -23,6 +23,8 @@
 
 #include "strata/core/expert_cache.hpp"
 #include "strata/core/hit_hook.hpp"
+#include "strata/core/pinned.hpp"
+#include "strata/kernels/cpu/expert_layout.hpp"
 #include "strata/kernels/cpu/pool.hpp"
 
 #include <atomic>
@@ -488,5 +490,9 @@ private:
     uint64_t pinned_bytes_ = 0;
     std::string gguf_;
 };
+
+/// Read native gate/up/down tensors from their manifest's individual GGUF shards into an expert arena.
+LoadStats load_experts_gguf(const std::string& gguf, uint8_t* dst,
+                           const strata::kernels::cpu::ExpertLayout& lay, int threads);
 
 }  // namespace strata::core

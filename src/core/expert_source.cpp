@@ -1384,7 +1384,9 @@ bool shared_arena_pack_hash(const std::string& pack_dir, const std::string& expe
         // bytes rather than only to an equal-size layout.
         const std::filesystem::path first(gguf);
         std::vector<std::filesystem::path> sources{first};
-        for (const std::string& name : lay.gguf_file) {
+        std::vector<std::string> shard_names = lay.gguf_file;
+        shard_names.insert(shard_names.end(), lay.gguf_role_file.begin(), lay.gguf_role_file.end());
+        for (const std::string& name : shard_names) {
             if (name.empty()) continue;
             const std::filesystem::path p = first.parent_path() / name;
             if (std::find(sources.begin(), sources.end(), p) == sources.end()) sources.push_back(p);
@@ -1413,7 +1415,9 @@ LoadStats load_experts_gguf(const std::string& gguf, uint8_t* dst, const strata:
     // a layer's experts may sit in another shard of the model (native_experts.txt v3): a name beside `gguf`
     const size_t cut = gguf.find_last_of("/\\");
     const std::string dir = cut == std::string::npos ? std::string() : gguf.substr(0, cut + 1);
-    auto file_of = [&](int64_t l) -> std::string {
+    auto file_of = [&](int64_t l, int r) -> std::string {
+        if (!lay.gguf_role_file.empty() && !lay.gguf_role_file[(size_t) (3 * l + r)].empty())
+            return dir + lay.gguf_role_file[(size_t) (3 * l + r)];
         if (lay.gguf_file.empty() || lay.gguf_file[(size_t) l].empty()) return gguf;
         return dir + lay.gguf_file[(size_t) l];
     };
@@ -1424,19 +1428,19 @@ LoadStats load_experts_gguf(const std::string& gguf, uint8_t* dst, const strata:
         for (;;) {
             const int64_t l = next.fetch_add(1);
             if (l >= lay.n_layers || bad) break;
-            const std::string name = file_of(l);
-            if (name != open_name) {
-                f.close();
-                f.clear();
-                f.open(name, std::ios::binary);
-                if (!f) { bad = true; return; }
-                open_name = name;
-            }
             const auto& fm = lay.fmt[(size_t) l];
             const uint64_t blob = lay.bytes[(size_t) l];
             const uint64_t per[3] = {fm.up_off, fm.up_off, blob - fm.down_off};
             const uint64_t at[3] = {0, fm.up_off, fm.down_off};
             for (int r = 0; r < 3; ++r) {
+                const std::string name = file_of(l, r);
+                if (name != open_name) {
+                    f.close();
+                    f.clear();
+                    f.open(name, std::ios::binary);
+                    if (!f) { bad = true; return; }
+                    open_name = name;
+                }
                 const uint64_t src = lay.gguf_off[(size_t) (3 * l + r)];
                 const uint64_t total = per[r] * (uint64_t) lay.n_expert;
                 const uint64_t chunk = per[r] * 16;           // 16 experts per read

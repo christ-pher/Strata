@@ -122,6 +122,45 @@ void test_canonical_layout() {
 }
 
 #if defined(STRATA_NATIVE_EXPERTS)
+void test_native_cross_shard() {
+    using namespace strata::kernels::cpu;
+    TempDirectory dir;
+    NativeFmt fmt;
+    std::string err;
+    require(native_fmt(GGML_TYPE_IQ4_XS, GGML_TYPE_IQ4_NL, 2560, 640, fmt, err), err);
+    const uint64_t per[3] = {fmt.up_off, fmt.up_off, fmt.bytes - fmt.down_off};
+    const uint64_t at[3] = {0, fmt.up_off, fmt.down_off};
+    const uint64_t off[3] = {17, 43, 91};
+    const char* names[3] = {"first.gguf", "up.gguf", "down.gguf"};
+    for (int r = 0; r < 3; ++r) {
+        std::ofstream file(dir.path / names[r], std::ios::binary);
+        file << std::string(off[r], 'x');
+        for (int e = 0; e < 2; ++e) file << std::string(per[r], char(10 * r + e + 1));
+        require((bool) file, "failed to write synthetic role shard");
+    }
+    auto manifest = [&](const std::string& suffix) {
+        std::ofstream file(dir.path / "native_experts.txt");
+        file << "# strata native experts v4 (n_expert 2, synthetic)\n"
+             << "0 23 20 0 " << fmt.bytes << " 17 43 91 " << suffix << '\n';
+    };
+    manifest("- up.gguf down.gguf");
+    require(expert_layout_load(dir.path.string(), 1, 2, err), err);
+    const auto lay = expert_layout();
+    std::vector<uint8_t> arena(lay.total);
+    auto stats = strata::core::load_experts_gguf((dir.path / names[0]).string(), arena.data(), lay, 2);
+    require(stats.ok && stats.bytes == lay.total, "cross-shard load failed: " + stats.error);
+    for (int r = 0; r < 3; ++r) for (int e = 0; e < 2; ++e) {
+        auto first = arena.begin() + lay.blob_offset(0, e) + at[r];
+        require(std::all_of(first, first + per[r], [&](uint8_t v) { return v == 10 * r + e + 1; }),
+                "cross-shard tensor bytes were misplaced");
+    }
+    fs::resize_file(dir.path / names[2], off[2] + 2 * per[2] - 1);
+    require(!strata::core::load_experts_gguf((dir.path / names[0]).string(), arena.data(), lay, 2).ok,
+            "truncated role shard accepted");
+    manifest("up.gguf down.gguf");
+    require(!expert_layout_load(dir.path.string(), 1, 2, err), "two shard names accepted");
+}
+
 void test_native_variable_layout() {
     using namespace strata::core;
     using namespace strata::kernels::cpu;
@@ -299,6 +338,7 @@ int main() {
         test_canonical_layout();
 #if defined(STRATA_NATIVE_EXPERTS)
         test_native_variable_layout();
+        test_native_cross_shard();
 #endif
         std::cout << "file_expert_source_test: PASS\n";
         return 0;

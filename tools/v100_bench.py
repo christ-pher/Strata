@@ -39,7 +39,7 @@ def make_prompts(tokenizer):
          "Use detailed paragraphs and a numbered review; distinguish evidence from assumptions."),
         ("deployment_plan", 4096, ["README.original.md", "docs/V100.md", "docs/DETAILS.md"],
          "Using the documentation below, write a detailed deployment and troubleshooting plan for a "
-         "single Volta GPU Linux VM with 94 GiB RAM and no AVX2. Cover model preparation, memory, "
+         "single Volta GPU Linux VM with 94 GiB RAM and an EPYC 7402 exposing AVX2. Cover model preparation, memory, "
          "storage, API configuration, lifecycle and verification. Explain tradeoffs and give shell examples."),
         ("architecture_analysis", 8192,
          ["docs/DETAILS.md", "src/core/expert_cache.cpp", "src/prefill/prefill.cpp"],
@@ -78,6 +78,8 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=512)
     ap.add_argument("--port", type=int, default=18080)
     ap.add_argument("--prompts", type=Path, help="replay a saved prompts.json instead of generating excerpts")
+    ap.add_argument("--models", nargs="+", default=["iq2_xs", "iq3_s"],
+                    help="model configuration names, e.g. iq3_s orca-iq4_xs")
     args = ap.parse_args()
     if args.repeats < 1 or args.max_tokens < 128:
         ap.error("use at least one repeat and an output budget of at least 128 tokens")
@@ -105,7 +107,7 @@ def main():
                          "peak": "maximum complete-request rate; not instantaneous"},
               "models": {}}
     save(out / "results.json", result)
-    for model in ("iq2_xs", "iq3_s"):
+    for model in args.models:
         source = json.loads((ROOT / f"strata-{model}.json").read_text())
         # Only engine configuration is copied; authentication/local UI settings are omitted.
         cfg = {k: source[k] for k in ("exe", "args", "cwd", "tokenizer", "model_name", "lib_dirs") if k in source}
