@@ -333,8 +333,16 @@ int main() {
             // AMD: the tensor-core prompt path is CUDA-only, so it refuses every pool and the old kernel runs
             std::printf("[5/5] qsa_prompt_attn mode 3: PASS (refused on HIP - the old kernel runs)\n");
 #else
-            std::printf("[5/5] qsa_prompt_attn mode 3: FAIL (refused the hybrid pools)\n");
-            g_fail = 1;
+            int dev = 0;
+            cudaDeviceProp prop{};
+            ck(cudaGetDevice(&dev), "prompt device");
+            ck(cudaGetDeviceProperties(&prop, dev), "prompt properties");
+            if (prop.major * 10 + prop.minor < 75) {
+                std::printf("[5/5] qsa_prompt_attn mode 3: PASS (refused pre-Turing GPU - the old kernel runs)\n");
+            } else {
+                std::printf("[5/5] qsa_prompt_attn mode 3: FAIL (refused the hybrid pools)\n");
+                g_fail = 1;
+            }
 #endif
         } else {
             k::fwht256_inplace_cuda(d_at4, QH, nullptr);

@@ -2,7 +2,7 @@
 
 A personal fork of [Niko1221/Strata](https://github.com/Niko1221/Strata), adapted to run **Qwen3.8-Flash-Next on a 32 GiB Volta GPU inside a Linux VM**, with EPYC 7402 host CPU passthrough (AVX2, FMA and F16C).
 
-This fork is based on **upstream 0.1.30 (`30ec18e`)**. It keeps Strata's browser UI, OpenAI-compatible and Anthropic-compatible APIs, expert caching, and MTP speculative decoding, with local changes for the V100 and this VM's CPU capabilities.
+This fork is based on **upstream 0.1.31 (`9259cad`)**. It keeps Strata's browser UI, OpenAI-compatible and Anthropic-compatible APIs, expert caching, and MTP speculative decoding, with local changes for the V100 and this VM's CPU capabilities.
 
 The unchanged upstream README is preserved in [README.original.md](README.original.md). Its performance figures describe upstream hardware; our measurements on this VM are in the [personal benchmarks](#personal-benchmarks-and-validation) below.
 
@@ -16,7 +16,9 @@ The unchanged upstream README is preserved in [README.original.md](README.origin
 - **External model storage:** weights, prepared packs, MTP assets, and local settings live under `/opt/models/Strata`, outside the source checkout.
 - **V100 launchers and numerical checks:** reproducible launch defaults plus BF16 GEMM and scalar expert regression tests.
 
-Upstream 0.1.30 functionality is retained, including its newer prompt processing, idle unload, conversation-cache options, and rope-scaling controls. The validated target for this fork is the single-GPU Linux VM below; other upstream hardware and platforms retain their own setup documentation.
+The 0.1.31 merge also retains compatibility with this fork's existing whitespace-separated v4 Orca manifests and corrects upstream prompt-attention dispatch to distinguish Volta sm70 from Turing sm75. New packs use upstream's comma-separated per-role shard format.
+
+Upstream 0.1.31 functionality is retained, including its newer prompt processing, idle unload, conversation-cache options, and rope-scaling controls. The validated target for this fork is the single-GPU Linux VM below; other upstream hardware and platforms retain their own setup documentation.
 
 ## The VM this runs on
 
