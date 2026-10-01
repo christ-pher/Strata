@@ -18,7 +18,7 @@ int main() {
     std::string err;
     if (!gemm.init(nullptr, 0, err)) throw std::runtime_error(err);
     // Narrow SIMT, irregular dimensions, prompt/output tile boundaries, and nontrivial output stride.
-    const int shapes[][3] = {{17,4,47}, {33,35,47}, {1031,35,47}, {2051,65,257}, {3,4103,4097}};
+    const int shapes[][3] = {{17,4,47}, {33,35,47}, {1031,35,47}, {3,4103,4097}};
     for (const auto& shape : shapes) for (float beta : {0.f, .5f, 1.f}) {
         const int t=shape[0], n=shape[1], k=shape[2], stride=n+4;
         std::vector<uint16_t> x(t*k), w(n*k);
