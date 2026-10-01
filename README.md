@@ -4,7 +4,7 @@ A personal fork of [Niko1221/Strata](https://github.com/Niko1221/Strata), adapte
 
 This fork is based on **upstream 0.1.30 (`30ec18e`)**. It keeps Strata's browser UI, OpenAI-compatible and Anthropic-compatible APIs, expert caching, and MTP speculative decoding, with local changes for the V100 and this VM's CPU capabilities.
 
-The unchanged upstream README is preserved in [README.original.md](README.original.md). Its performance figures describe upstream hardware; personal V100 benchmarks will be added after testing this build.
+The unchanged upstream README is preserved in [README.original.md](README.original.md). Its performance figures describe upstream hardware; our measurements on this VM are in the [personal benchmarks](#personal-benchmarks-and-validation) below.
 
 ## What changed in this fork
 
@@ -158,11 +158,24 @@ git merge upstream/main
 
 Commit local work before merging. On the existing VM, `origin` already points to this fork and `upstream` to the original repository. External model files can be reused across source updates.
 
-## Validation and future benchmarks
+## Personal benchmarks and validation
 
-The 0.1.30 update passed a full sm70 build, eight focused GPU/scalar numerical checks, the server/tokenizer suite (80 tests with two platform skips), and 19 setup rope tests. A real IQ3_S API request loaded the migrated files and returned `42` for `17 + 25`. Details and earlier checks are in [V100 validation](docs/V100-validation.md).
+Measured on **2026-10-01**, using this VM's 32 GiB Volta GPU, 24 vCPUs without AVX2, approximately 94 GiB RAM, and the fork's **0.1.30** engine built with CUDA 12.8.
 
-**Personal benchmarks are pending testing of the latest build.** Results will be added with the model and quantization, context and prompt length, KV settings, speculation settings, CPU exposure, and measurement method. Existing short API checks establish functionality; no V100 throughput ranking is claimed here.
+| Model | Prompt average (tokens/s) | Prompt peak (tokens/s) | Decode average (tokens/s) | Decode peak (tokens/s) |
+| --- | ---: | ---: | ---: | ---: |
+| IQ2_XS | 725.7 | 880.3 | 55.9 | 60.1 |
+| IQ3_S | 692.6 | 845.3 | 47.5 | 49.8 |
+
+Each model ran **six measured requests**: a source-code review (**1,124 prompt tokens**), a deployment/troubleshooting plan (**4,226**), and an architecture/performance analysis (**8,348**), each repeated twice. Every request generated **512 tokens**, giving **3,072 output tokens per model**. The material came from repository documentation and source excerpts; exact prompts and responses are saved with the results.
+
+Settings were identical: **262,144 context, INT8 KV with 32,768 resident cells, automatic prefill and expert caching, MTP speculation 4, `STRATA_PREFILL_RING=8`, temperature 0, and thinking disabled**. One 128-token warm-up per model was excluded. Prompt reuse was disabled (`--prompt-cache 0`), and every measured request reported zero cached prompt tokens. GPU expert caching remained enabled and adapted across requests.
+
+**Average** is the arithmetic mean of the six engine-reported request rates. **Peak** is the fastest complete measured request for that phase, not an instantaneous maximum; prompt and decode peaks can come from different requests. Timings exclude model loading and HTTP/tokenization overhead. Responses were capped at 512 tokens to provide a consistent decode workload. These are single-VM throughput measurements for these prompts, not a model-quality evaluation or a prediction for other workloads.
+
+[Per-request table and reproduction instructions](bench/results/2026-10-01-v100/README.md) · [Raw measurements and responses](bench/results/2026-10-01-v100/results.json) · [Exact prompts](bench/results/2026-10-01-v100/prompts.json)
+
+The update also passed a full sm70 build, eight focused GPU/scalar numerical checks, the server/tokenizer suite (80 tests with two platform skips), and 19 setup rope tests. Earlier functional checks are in [V100 validation](docs/V100-validation.md).
 
 ## Troubleshooting and technical details
 
