@@ -2342,6 +2342,8 @@ def main() -> int:
             update_installed_engine(a.prebuilt)
         return start(selected, a.port, run_gpu, yes=a.yes, layer_split=a.layer_split,
                      keep={"host": a.host, "api_key": a.api_key, "draft_vocab": a.draft_vocab})
+    if a.prepare_vision:
+        fail("--prepare-vision requires an installed model selected through run-v100.sh")
     if have and a.calibrate and not (a.setup or a.model or a.family or a.check):
         if not a.build:
             update_installed_engine(a.prebuilt)

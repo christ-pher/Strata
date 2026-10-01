@@ -41,6 +41,18 @@ class UnifiedLauncher(unittest.TestCase):
             self.assertEqual(start.call_args.args[0], selected)
             download.assert_not_called()
 
+    def test_prepare_flag_does_not_start_server(self):
+        selected = setup.ROOT / "strata-orca-iq4_xs.json"
+        with mock.patch.dict(os.environ, {"STRATA_UNIFIED_LAUNCHER": "1"}), \
+             mock.patch.object(sys, "argv", ["setup.py", "--family", "orca", "--model", "IQ4_XS", "--prepare-vision", "gpu", "--yes"]), \
+             mock.patch.object(setup, "data_folder", return_value=(Path("/tmp/data"), [])), \
+             mock.patch.object(setup, "installed_configs", return_value=[selected]), \
+             mock.patch.object(setup, "configure_existing_vision") as prepare, \
+             mock.patch.object(setup, "start") as start, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(setup.main(), 0)
+            self.assertTrue(prepare.call_args.kwargs["prepare_only"])
+            start.assert_not_called()
+
     def test_prepare_vision_preserves_config(self):
         with tempfile.TemporaryDirectory() as td:
             cfg = Path(td) / "strata-orca-iq4_xs.json"
