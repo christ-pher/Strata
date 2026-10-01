@@ -326,8 +326,8 @@ def cc(g) -> str:
 
 def gpu_problem(g, together=False):
     """Why Strata cannot use this card, in plain words (None: it can)."""
-    if int(g["arch"]) < 75:
-        return (f"not supported - older than the RTX 20 series (compute capability {cc(g)}; Strata needs 7.5 or "
+    if int(g["arch"]) < 70:
+        return (f"not supported - older than Volta (compute capability {cc(g)}; Strata needs 7.0 or "
                 "newer)")
     if together and g["vram_gb"] < SPLIT_MIN_VRAM_GB - 0.5:
         return (f"not supported together with other GPUs - {g['vram_gb']:.0f} GB of VRAM (a card sharing the model "
@@ -425,7 +425,7 @@ def choose_gpus(a, found) -> list:
     single = sorted([g for g in found if gpu_problem(g) is None], key=lambda x: (-round(x["vram_gb"]), x["index"]))
     if not single:
         gpu_table(found)
-        fail("none of your GPUs can run Strata", "it needs an NVIDIA RTX 20 series or newer (compute capability 7.5+)")
+        fail("none of your GPUs can run Strata", "it needs an NVIDIA Volta / V100 or newer (compute capability 7.0+)")
     can = together_ok(found)
     if not can:
         return [single[0]["index"]]
@@ -490,7 +490,8 @@ def gpu_info(pick=None):
     return {**g, "count": len(found)}
 
 
-def find_nvcc():
+def find_nvcc(max_major=None):
+    """Newest installed toolkit, optionally restricted to a maximum CUDA major version."""
     cands = [shutil.which("nvcc")]
     if os.environ.get("CUDA_PATH"):
         cands.append(str(Path(os.environ["CUDA_PATH"]) / "bin" / ("nvcc.exe" if WIN else "nvcc")))
@@ -505,7 +506,7 @@ def find_nvcc():
     for c in dict.fromkeys(cands):                     # every toolkit found; the newest wins
         if c and Path(c).exists():
             v = re.search(r"release (\d+)\.(\d+)", out([c, "--version"]))
-            if v and (best[1] is None or (int(v.group(1)), int(v.group(2))) > best[1]):
+            if v and (max_major is None or int(v.group(1)) <= max_major) and (best[1] is None or (int(v.group(1)), int(v.group(2))) > best[1]):
                 best = (c, (int(v.group(1)), int(v.group(2))))
     return best
 
@@ -809,6 +810,8 @@ def driver_major(gpu):
 def get_prebuilt(url_base, gpu, vision, updating=False) -> Path | None:
     """The ready-made engine in engine/ (kept between runs), or None when there is none for this PC.
     updating: called to replace an installed engine, which starts instead when this fails (no compile)."""
+    if min(int(x) for x in gpu.get("archs", [gpu["arch"]])) < 75 or not cpu_info()[1]:
+        return None  # Volta needs CUDA 12; CPUs without AVX2 need native scalar ggml.
     eng = ROOT / "engine"
     info = eng / "BUILD.json"
     if info.exists() and (eng / EXE).exists():
@@ -945,9 +948,36 @@ def update_installed_engine(url_base) -> None:
     pip_install(CUDA_WHEELS, "NVIDIA CUDA libraries (cuBLAS, CUDA runtime; ~0.4 GB)")
 
 
+CUDA_GCC_MAX = {(12, 0): 12, (12, 1): 12, (12, 2): 12, (12, 3): 12, (12, 4): 13, (12, 5): 13, (12, 6): 13,
+                (12, 8): 14, (12, 9): 14, (13, 0): 15}   # the newest GCC each CUDA toolkit accepts as nvcc's host compiler
+
+
+def cuda_host_compiler(cuda_v) -> list:
+    """Linux: the CMake definitions for a GCC this toolkit accepts, when the default one is newer than it allows
+    (CUDA 12.x - which Volta needs - refuses a distribution's current GCC).  The C and C++ compilers are that same
+    version: nvcc adds its GCC's library folder to the link, and C++ objects of a newer GCC then fail to link against
+    the older libstdc++.  Empty: the default one is fine, or CUDAHOSTCXX already says."""
+    top = CUDA_GCC_MAX.get(tuple(cuda_v))
+    if WIN or top is None or os.environ.get("CUDAHOSTCXX") or shutil.which("g++") is None:
+        return []
+    m = re.match(r"(\d+)", out(["g++", "-dumpversion"]).strip())
+    if m is None or int(m.group(1)) <= top:
+        return []
+    for v in range(top, 8, -1):
+        cxx, c = shutil.which(f"g++-{v}"), shutil.which(f"gcc-{v}")
+        if cxx and c:
+            ok(f"compiling with GCC {v} (CUDA {cuda_v[0]}.{cuda_v[1]} accepts up to {top}; the default is {m.group(1)})")
+            return [f"-DCMAKE_C_COMPILER={c}", f"-DCMAKE_CXX_COMPILER={cxx}", f"-DCMAKE_CUDA_HOST_COMPILER={cxx}"]
+    warn(f"g++ {m.group(1)} is newer than CUDA {cuda_v[0]}.{cuda_v[1]} accepts (up to {top}) and no g++-{top} or older "
+         f"was found: the build may fail (install g++-{top}, or set CUDAHOSTCXX)")
+    return []
+
+
+
 def install_build_tools(gpu, yes):
     """The compiler and the CUDA toolkit, installed for the user (asks once).  Returns (nvcc, vcvars)."""
-    nvcc, cuda_v = find_nvcc()
+    nvcc, cuda_v = find_nvcc(12 if min(int(x) for x in gpu.get("archs", [gpu["arch"]])) < 75 else None)
+    cuda_name = "12.8" if min(int(x) for x in gpu.get("archs", [gpu["arch"]])) < 75 else "13.0"
     need_cuda = (12, 8) if max(int(x) for x in gpu.get("archs", [gpu["arch"]])) >= 120 else (12, 0)
     vcvars = find_vcvars() if WIN else None
     have_cc = vcvars is not None if WIN else shutil.which("g++") is not None
@@ -955,7 +985,7 @@ def install_build_tools(gpu, yes):
     if not have_cc:
         missing.append("Visual Studio 2022 Build Tools (C++)" if WIN else "the C++ compiler (build-essential)")
     if nvcc is None or cuda_v < need_cuda:
-        missing.append("the NVIDIA CUDA Toolkit 13.0")
+        missing.append(f"the NVIDIA CUDA Toolkit {cuda_name}")
     if not missing:
         ok(f"build tools present (CUDA {cuda_v[0]}.{cuda_v[1]})")
         return nvcc, vcvars
@@ -975,7 +1005,7 @@ def install_build_tools(gpu, yes):
                  "--quiet --wait --norestart --nocache --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"],
                 check=False)
         if nvcc is None or cuda_v < need_cuda:
-            run([*wg, "--id", "Nvidia.CUDA", "--version", "13.0"], check=False)
+            run([*wg, "--id", "Nvidia.CUDA", "--version", cuda_name], check=False)
         vcvars = find_vcvars()
     else:
         apt = shutil.which("apt-get")
@@ -996,8 +1026,8 @@ def install_build_tools(gpu, yes):
                      deb, "CUDA repository key")
             run(["sudo", "dpkg", "-i", str(deb)])
             run(["sudo", "apt-get", "update"])
-            run(["sudo", "apt-get", "install", "-y", "cuda-toolkit-13-0"])
-    nvcc, cuda_v = find_nvcc()
+            run(["sudo", "apt-get", "install", "-y", "cuda-toolkit-" + cuda_name.replace(".", "-")])
+    nvcc, cuda_v = find_nvcc(12 if min(int(x) for x in gpu.get("archs", [gpu["arch"]])) < 75 else None)
     if (WIN and find_vcvars() is None) or (not WIN and shutil.which("g++") is None):
         fail("the C++ build tools did not install", "install them by hand (README.md) and run it again")
     if nvcc is None or cuda_v < need_cuda:
@@ -1067,6 +1097,7 @@ def build_engine(gpu, vision, yes, llama) -> Path:
     if local:
         archs = sorted(built | set(archs))
     nvcc, vcvars = install_build_tools({**gpu, "archs": archs}, yes)
+    host_def = cuda_host_compiler(find_nvcc(12 if min(archs) < 75 else None)[1])
     cuda_archs = ";".join(str(x) for x in archs)
     if not engine_ok:
         say("  Compiling the engine for " + ", ".join(f"sm_{x}" for x in archs) + " (a card it had no code for; "
@@ -1075,13 +1106,13 @@ def build_engine(gpu, vision, yes, llama) -> Path:
             if local and (eng / EXE).exists() else "  Compiling the Strata engine for your GPU (10-20 minutes, once) ...")
         cmake_build(ROOT, ROOT / "build", "strata",
                     ["-DSTRATA_ENABLE_CUDA=ON", "-DSTRATA_BUILD_TESTS=OFF", f"-DCMAKE_CUDA_ARCHITECTURES={cuda_archs}",
-                     f"-DCMAKE_CUDA_COMPILER={nvcc}", f"-DSTRATA_GGML_DIR={llama}"], vcvars, "build-strata.bat")
+                     f"-DCMAKE_CUDA_COMPILER={nvcc}", f"-DSTRATA_GGML_DIR={llama}", *host_def], vcvars, "build-strata.bat")
         shutil.copy2(ROOT / "build" / EXE, eng / EXE)
     if not vision_ok:
         say("  Compiling the image encoder" + (" with CUDA (10-20 minutes, once) ..." if vision == "gpu" else " ..."))
         defs = [f"-DLLAMA_DIR={llama}", f"-DSTRATA_VISION_CUDA={'ON' if vision == 'gpu' else 'OFF'}"]
         if vision == "gpu":
-            defs += [f"-DCMAKE_CUDA_ARCHITECTURES={cuda_archs}", f"-DCMAKE_CUDA_COMPILER={nvcc}"]
+            defs += [f"-DCMAKE_CUDA_ARCHITECTURES={cuda_archs}", f"-DCMAKE_CUDA_COMPILER={nvcc}", *host_def]
         cmake_build(ROOT / "tools" / "vision", ROOT / "build-vision", "strata-vision", defs, vcvars, "build-vision.bat")
         shutil.copy2(ROOT / "build-vision" / "bin" / VEXE, eng / VEXE)
     bindir = Path(nvcc).parent                            # the toolkit's own libraries (bin, bin/x64, lib64)
@@ -1731,7 +1762,7 @@ def main() -> int:
              "Advanced system settings > Performance > Advanced > Virtual memory")
     ok(f"CPU: {cpu} ({'AVX-512' if avx512 else 'AVX2' if avx2 else 'no AVX2'})")
     if not avx2:
-        fail("this CPU has no AVX2; Strata needs at least AVX2")
+        warn("this CPU has no AVX2: compiling locally with scalar expert kernels; CPU work will be slower")
     if a.check:
         say()
         for m, d in MODELS.items():

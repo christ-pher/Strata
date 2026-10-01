@@ -1,0 +1,55 @@
+STRATA ON THIS HEADLESS V100 VM
+
+Start the prepared IQ2_XS model:
+  cd /opt/engines/Strata
+  ./run-v100.sh
+
+Keep the terminal/SSH session open while it runs. Wait for the "ready" message.
+From another computer on your LAN, open:
+  http://10.0.20.99:8080
+No API key is required. If you previously saved a key in the web UI, clear it.
+OpenAI-compatible API base URL: http://10.0.20.99:8080/v1
+Stop with Ctrl+C. Stop the current model before starting another on port 8080.
+
+Other supported choices (first run downloads/prepares the additional weights):
+  ./run-v100.sh Q2_0       fastest/lower precision
+  ./run-v100.sh IQ2_XS     current model; balanced
+  ./run-v100.sh IQ3_XXS    higher precision
+  ./run-v100.sh IQ3_S      highest precision in this installer
+  ./run-v100.sh coder      coding-focused, pruned model (IQ1_M filename)
+  ./run-v100.sh orca       OrcaRouter uncensored IQ3_XXS
+  ./run-v100.sh IQ2_XS --family swift   Swift 1.5 fine-tune
+
+Download/prepare without starting:
+  ./run-v100.sh IQ3_S --no-start
+Change context length:
+  ./run-v100.sh IQ2_XS --context 65536
+
+WHICH MODEL DOWNLOADS WORK?
+Prefer the exact repositories already supported by this checkout:
+Original: https://huggingface.co/ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF
+Coder:    https://huggingface.co/ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-Coder-GGUF
+Swift:    https://huggingface.co/ukisai/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-GGUF
+Original: Q2_0, IQ2_XS, IQ3_XXS, IQ3_S. Swift: first three. Coder: IQ1_M.
+Use the launcher to download them; it selects the correct files automatically.
+
+For a release from another creator, a matching name or .gguf extension is not
+sufficient. It must have Strata's qwen4exp architecture/geometry and supported
+per-tensor quantization formats. GSQ-RCO releases preserve some projections as
+BF16, which Strata expects. Ordinary GGUF quantizations may require conversion.
+Download every matching shard from the same release; preserve their filenames.
+Do not substitute Qwen3.8-27B or a different Qwen architecture.
+Safetensors/AWQ/GPTQ/EXL2 downloads are not direct inputs to this engine.
+
+OrcaRouter IQ3_XXS has a dedicated setup and launcher in this checkout:
+  ./setup-orca-v100.sh     download/resume and prepare
+  ./run-orca-v100.sh       start Orca (stop the other model first)
+  ./stop-orca-v100.sh      stop Orca, including the background test instance
+See docs/ORCA-V100.md. Other Orca quants are not validated; IQ3_M includes
+unsupported Q5_0 expert down matrices.
+Ask for a compatibility check before downloading an unfamiliar release.
+
+This VM has enough RAM for the installer choices, but additional cached models
+need more disk space. IQ2_XS and Orca IQ3_XXS have been tested end to end on this machine.
+Models: data/models-download/   Packs and MTP: data/runtime/
+Runtime log: strata-iq2_xs.log   Validation: docs/V100-validation.md

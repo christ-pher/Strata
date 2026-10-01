@@ -1361,7 +1361,7 @@ int main(int argc, char** argv) {
     else if (!strata::kernels::cpu::cpu_avx512_ok())
         std::fprintf(stderr, "strata generate: this CPU has no AVX-512: the expert kernels run on %s "
                              "(multi-token for the i-quant gate/up rows)\n",
-                     std::getenv("STRATA_NO_IQ256") == nullptr ? "AVX-2" : "ggml-cpu vec_dot (STRATA_NO_IQ256 set)");
+                     strata::kernels::cpu::cpu_avx2_ok() && std::getenv("STRATA_NO_IQ256") == nullptr ? "AVX-2" : "ggml-cpu vec_dot (STRATA_NO_IQ256 set)");
     strata::core::NativeEmbed native_embed;
     if (native_pack) {
         if (o.native_preset.empty() || o.spec < 2 || o.keep_canonical ||
@@ -1391,8 +1391,9 @@ int main(int argc, char** argv) {
             return 1;
         }
         if (!o.native_head_gguf.empty()) skip.insert("output.weight");
-        // the PLE module validates its canonical key at construction (8 MB); a native pack has none to load
-        if (!native_pack) skip.erase("blk.1.ple_key.weight");
+        // Keep the packed PLE key resident: compatibility packs can convert it to BF16.
+        // A quantized key can still receive a native override after its metadata is loaded.
+        skip.erase("blk.1.ple_key.weight");
         if (native_pack) skip.insert("token_embd.weight");
     }
     uint64_t pool_bytes = 0;

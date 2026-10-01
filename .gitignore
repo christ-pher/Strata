@@ -47,3 +47,11 @@ build-vision.bat
 *.done
 /third_party/*.zip
 
+
+# Local V100 model assets
+/data/models-download/
+/data/runtime/
+!/run-v100.sh
+/third_party/llama.cpp
+
+!/run-orca-v100.sh

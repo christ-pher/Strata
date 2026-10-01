@@ -2,6 +2,10 @@
 #include "strata/kernels/cpu/expert_layout.hpp"
 
 #include <cstdio>
+#include <cmath>
+#include <algorithm>
+#include <cstring>
+#include "strata/artifact/dequant.hpp"
 #include <cstdlib>
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -18,6 +22,20 @@ ExpertLayout g_layout;
 }
 
 const ExpertLayout& expert_layout() { return g_layout; }
+
+bool cpu_avx2_ok() {
+#if defined(_MSC_VER)
+    int r[4];
+    __cpuidex(r, 1, 0);
+    if (!(r[2] & (1 << 27)) || !(r[2] & (1 << 12)) || (_xgetbv(0) & 6) != 6) return false;
+    __cpuidex(r, 7, 0);
+    return (r[1] & (1 << 5)) != 0;
+#else
+    static const bool ok = __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma") &&
+                           __builtin_cpu_supports("f16c");
+    return ok;
+#endif
+}
 
 bool cpu_avx512_ok() {
     static const bool ok = [] {
@@ -54,12 +72,48 @@ bool cpu_avx512_ok() {
 void q2_rows_any(const uint8_t* w, size_t row_bytes, int nblocks, const ActQ* const* a, int nt, float* const* out,
                  int r0, int r1) {
     if (cpu_avx512_ok()) q2_0_gguf_rows_multi(w, row_bytes, nblocks, a, nt, out, r0, r1);
-    else q2_0_gguf_rows_multi_avx2(w, row_bytes, nblocks, a, nt, out, r0, r1);
+    else if (cpu_avx2_ok()) q2_0_gguf_rows_multi_avx2(w, row_bytes, nblocks, a, nt, out, r0, r1);
+    else {
+        for (int r = r0; r < r1; ++r)
+            for (int t = 0; t < nt; ++t) {
+                float sum = 0.0f;
+                for (int b = 0; b < nblocks; ++b) {
+                    const uint8_t* block = w + (size_t) r * row_bytes + b * 18;
+                    uint16_t h; std::memcpy(&h, block, 2);
+                    const float d = strata::fp16_to_fp32(h);
+                    for (int half = 0; half < 2; ++half) {
+                        int dot = 0;
+                        for (int j = 0; j < 32; ++j) {
+                            const int i = half * 32 + j;
+                            dot += ((block[2 + i / 4] >> (2 * (i % 4))) & 3) * a[t]->q[b * 64 + i];
+                        }
+                        const int chunk = 2 * b + half;
+                        sum += d * (a[t]->scale[chunk] * dot - a[t]->hx[chunk]);
+                    }
+                }
+                out[t][r] = sum;
+            }
+    }
 }
 
 void act_quant_any(const float* x, int n, ActQ& a) {
     if (cpu_avx512_ok()) act_quant_q8_1(x, n, a);
-    else act_quant_q8_1_avx2(x, n, a);
+    else if (cpu_avx2_ok()) act_quant_q8_1_avx2(x, n, a);
+    else {
+        a.nchunks = n / QKA;
+        for (int k = 0; k < a.nchunks; ++k) {
+            float amax = 0.0f;
+            for (int j = 0; j < QKA; ++j) amax = std::fmax(amax, std::fabs(x[k * QKA + j]));
+            const float scale = amax / 127.0f, inv = scale > 0.0f ? 1.0f / scale : 0.0f;
+            int sum = 0;
+            for (int j = 0; j < QKA; ++j) {
+                const float v = x[k * QKA + j] * inv;
+                const int q = std::max(-127, std::min(127, (int) (v + (v >= 0.0f ? 0.5f : -0.5f))));
+                a.q[k * QKA + j] = (int8_t) q; sum += q;
+            }
+            a.scale[k] = scale; a.sum[k] = sum; a.hx[k] = scale * sum;
+        }
+    }
 }
 
 #if !defined(STRATA_NATIVE_EXPERTS)

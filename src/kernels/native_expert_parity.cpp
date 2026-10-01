@@ -155,7 +155,7 @@ int main(int argc, char** argv) {
                     std::printf("          gate+up %d tokens one thread: %s %.0f us vs ggml %d x %.0f us\n", NT, tag, usn, NT, usg);
                 };
                 if (cpu::cpu_avx512_ok()) check("avx512", true);   // guarded: the binary runs on AVX-2 CPUs too
-                check("avx2", false);
+                if (cpu::cpu_avx2_ok()) check("avx2", false);
             }
             for (int k = 0; k < NT; ++k) {
                 cpu::native_quant_h(f, ff[k].data(), hq[k].data());
@@ -178,9 +178,9 @@ int main(int argc, char** argv) {
                 }
                 cpu::q2_rows_any(blob.data() + f.down_off, f.d_row, (int) (FF / 64), ap, NT, altp, 0, (int) H);
                 std::printf("          q2_0 %s down vs ggml down: rel %.2e\n",
-                            cpu::cpu_avx512_ok() ? "AVX-512" : "AVX-2", rel(alt, got_c));
+                            cpu::cpu_avx512_ok() ? "AVX-512" : cpu::cpu_avx2_ok() ? "AVX-2" : "scalar", rel(alt, got_c));
             }
-            if (f.d_type == 20) {
+            if (f.d_type == 20 && cpu::cpu_avx2_ok()) {
                 // (b3) the IQ4_NL multi-token AVX-2 kernel the pool now uses for IQ4_NL down projections,
                 // against ggml-cpu's single-token vec_dot on the SAME Q8_0 activations (h), plus timing.
                 std::vector<float> alt((size_t) NT * H), refd((size_t) NT * H);

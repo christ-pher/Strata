@@ -96,6 +96,9 @@ a big GPU makes up for less RAM - the [low-RAM mode](docs/DETAILS.md)),
 install yourself is a current **NVIDIA driver** ([nvidia.com/drivers](https://www.nvidia.com/drivers) or the NVIDIA
 App). Everything else - Python, the engine, the model - is set up for you.
 
+**Tesla V100 / Volta (sm70):** this local port builds with CUDA 12 and uses FP32 fallbacks.
+See [V100 setup](docs/V100.md), including the launcher and other model sizes.
+
 **Windows**
 
 1. [Download this project](https://github.com/Niko1221/Strata/archive/refs/heads/main.zip) and unzip it (or `git clone` it).

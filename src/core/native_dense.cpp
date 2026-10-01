@@ -136,6 +136,15 @@ bool NativeDense::load(const std::vector<std::string>& shards, WeightTable& tabl
                     err = "native dense: tensor absent from canonical table: " + tensor.name; return false;
                 }
                 auto& ref = found->second;
+                // Compatibility packing deliberately converts the PLE key to BF16.
+                // Preserve that canonical key rather than uploading the original quantized matrix.
+                if (tensor.name == "blk.1.ple_key.weight" && !ref.quantized() &&
+                    ref.kind == WeightKind::Bf16InF32) {
+                    if (!ref.data || !ref.resident) {
+                        err = "native dense: converted BF16 PLE key must remain resident"; return false;
+                    }
+                    continue;
+                }
                 if (ref.native_data) { err = "native dense: override already attached"; return false; }
                 if (!strata::kernels::native_mmvq_supported(tensor.type)) continue;
                 if (!ref.quantized() || tensor.shape.size() != 2 ||
