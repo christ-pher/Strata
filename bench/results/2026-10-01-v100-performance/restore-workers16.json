@@ -1,0 +1,6 @@
+{
+  "config": "/opt/engines/Strata/strata-orca-iq4_xs.json",
+  "kind": "workers",
+  "before": "8",
+  "after": "16"
+}

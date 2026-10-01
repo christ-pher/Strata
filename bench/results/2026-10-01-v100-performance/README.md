@@ -1,7 +1,7 @@
 # Orca IQ4_XS tuning on the V100 VM — 2026-10-01
 
 The retained engine change is bounded background expert-usage recording. The saved Orca configuration now uses
-8 CPU workers; the benefit was repeatable in text-only runs but not established with vision loaded. Vision
+16 CPU workers (changed from 8 at the user’s request); the benefit was repeatable in text-only runs but not established with vision loaded. Vision
 remains enabled in the saved config. The BF16 weight-reuse experiment was reverted after a neutral full-model
 prompt result. Other model configs, model precision, KV settings and speculative decoding are unchanged.
 
@@ -136,3 +136,15 @@ The abrupt benchmark teardown interrupted the final pending snapshot, leaving a 
 snapshot remained readable. Ordinary ongoing collection does not wait for disk writes, and pending data can be
 lost on abrupt termination as documented.
 Temporary servers were stopped after testing.
+
+## Subsequent worker preference
+
+The user selected 16 workers after reviewing the results. The saved Orca configuration was changed from 8 to 16;
+recording and vision were retained. Restore just this adjustment to return to 8:
+
+```sh
+.venv/bin/python tools/v100_tuning.py --restore bench/results/2026-10-01-v100-performance/restore-workers16.json
+```
+
+To return from 16 to the original automatic worker selection, restore to 8 first with the command above,
+then apply `restore-workers.json`. Worker changes take effect on the next engine launch.
