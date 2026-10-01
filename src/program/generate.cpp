@@ -52,6 +52,7 @@
 #include "strata/core/native_dense.hpp"
 #include "strata/program/logits_selection.hpp"
 #include "strata/program/conv_cache.hpp"
+#include "strata/program/expert_usage.hpp"
 #include "strata/spec/draft_policy.hpp"
 #include "strata/spec/suffix_drafter.hpp"
 #include "strata/kernels/cvec.hpp"
@@ -604,6 +605,7 @@ struct Drive {
     /// needs no locking.  `d.layers` is the CURRENT layer on entry (the adapter increments it as it walks the
     /// blob), which is why the layer index comes from there rather than from a counter of our own.
     std::FILE* routing = nullptr;
+    strata::program::ExpertUsage* usage = nullptr;
 };
 
 void drive_pool(void* user, const float* x_f, const int32_t* ids, const float* weights, int64_t n_embd, int64_t k,
@@ -613,6 +615,7 @@ void drive_pool(void* user, const float* x_f, const int32_t* ids, const float* w
     strata::core::expert_pool_dispatch(&t->d, x_f, ids, weights, n_embd, k, out);
     t->cpu_ms += std::chrono::duration<double, std::milli>(Clock::now() - a).count();
     ++t->calls;
+    if (t->usage) t->usage->record(t->d.layers - 1, ids, 1, k);
     // THE ROUTING TRACE.  Written AFTER the dispatch so the layer index is still this layer's: `d.layers` is
     // advanced by the adapter as it consumes the blob, and reading it after the call is the same value the
     // dispatch used.  Record = int32 layer, int32 k, k int32 ids, k float weights.
@@ -644,6 +647,7 @@ void drive_pool_multi(void* user, const float* x_f, const int32_t* ids, int64_t 
     strata::core::expert_pool_dispatch_multi(t->d, x_f, ids, n_tok, k, out);
     t->cpu_ms += std::chrono::duration<double, std::milli>(Clock::now() - a).count();
     ++t->calls;
+    if (t->usage) t->usage->record(layer, ids, n_tok, k);
     // the routing trace for the serve path: the same record format drive_pool writes (layer, k, ids, weights),
     // one record per token.  The multi dispatch fuses the router weights into the kernel and does not surface
     // them, so records carry unit weights: tools/make_profile.py ranks pairs by routed frequency, which is the
@@ -3102,6 +3106,15 @@ int main(int argc, char** argv) {
         strata::core::stage_timing_name(14, "  gdn: z + out_norm");
         strata::core::stage_timing_name(15, "  gdn: out gemv");
     }
+    strata::program::ExpertUsage usage;
+    if (const char* directory = std::getenv("STRATA_EXPERT_USAGE_DIR"); directory && directory[0]) {
+        if (!o.no_pool && usage.start(directory, (int) g.n_layers, (int) g.n_expert)) {
+            drive.usage = &usage;
+            std::fprintf(stderr, "strata usage: background decode/verification counts in %s\n", directory);
+        } else {
+            std::fprintf(stderr, "strata usage: recording unavailable (check directory permissions and expert pool)\n");
+        }
+    }
     std::FILE* routing = nullptr;
     if (!o.dump_routing.empty()) {
         if (o.no_pool) {
@@ -5535,6 +5548,7 @@ int main(int argc, char** argv) {
                         (long long) (src.ram_reads() - ram0), (long long) (src.file_reads() - files0),
                         (double) (src.file_read_bytes() - file_bytes0) / 1e6);
             std::fflush(stdout);
+            if (drive.usage) drive.usage->publish();
             if (drive.routing != nullptr) std::fflush(drive.routing);   // the routing trace survives a crash and is watchable mid-session
             const int64_t fresh = n - resume;
             std::fprintf(stderr, "strata serve: prompt %lld tokens = %lld reused + %lld read in %.0f ms (%.1f tok/s), "

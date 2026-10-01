@@ -67,6 +67,7 @@ def main():
     ap.add_argument("--no-base", action="store_true", help="rank by the traces only")
     ap.add_argument("--out", default=str(ROOT / "data" / "expert-profile.bin"))
     ap.add_argument("--n-expert", type=int, default=N_EXPERT, help="experts per layer (default 512)")
+    ap.add_argument("--usage", nargs="*", type=Path, default=[], help="background usage TSV snapshots (each file once)")
     a = ap.parse_args()
 
     ranked, seen = [], set()
@@ -86,6 +87,20 @@ def main():
     for t in a.traces:
         for p, c in read_trace(t, ne).items():
             freq[p] += c
+    for path in set(p.resolve() for p in a.usage):
+        lines = path.read_text().splitlines()
+        if not lines or lines[0] != f"# strata-expert-usage-v1 {N_LAYER} {ne}":
+            raise SystemExit(f"{path}: invalid usage header or model dimensions")
+        seen_rows = set()
+        for line in lines[1:]:
+            layer, expert, count = map(int, line.split())
+            pair = (layer, expert)
+            if not (0 <= layer < N_LAYER and 0 <= expert < ne and count >= 0) or pair in seen_rows:
+                raise SystemExit(f"{path}: invalid or duplicate usage row: {line}")
+            seen_rows.add(pair)
+            freq[pair] += count
+    if a.usage and not a.no_base:
+        raise SystemExit("Usage tuning requires --no-base: a complete base ranking would hide the new counts")
     take(p for p, _ in sorted(freq.items(), key=lambda kv: (-kv[1], kv[0])))
     n_trace = len(ranked) - n_base
     take((layer, e) for e in range(ne) for layer in range(N_LAYER))   # the rest, across the layers
