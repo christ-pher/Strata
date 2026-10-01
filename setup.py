@@ -95,12 +95,14 @@ MODELS = {
     "Q2_0": {"about": "2-bit, the fastest", "download_gb": 66.4, "ram_gb": 48, "arena_gb": 34.0, "families": ("qwen",)},
     "IQ2_XS": {"about": "2-bit i-quant, a little better quality, close in speed", "download_gb": 68.0, "ram_gb": 48,
                "arena_gb": 35.5},
-    "IQ3_XXS": {"about": "3-bit i-quant, better quality, slower (more CPU work per token)", "download_gb": 75.8,
+    "IQ3_XXS": {"families": ("qwen", "swift", "orca"), "about": "3-bit i-quant, better quality, slower (more CPU work per token)", "download_gb": 75.8,
                 "ram_gb": 60, "arena_gb": 42.9},
     # the original model only (Swift 1.5 has no IQ3_S): matches the full BF16 model on the published benchmarks
     "IQ3_S": {"about": "3.5-bit i-quant, the best quality (matches the full model), the slowest; needs a 64 GB PC "
                        "with little else running", "download_gb": 83.6, "ram_gb": 62, "arena_gb": 50.3,
               "families": ("qwen",)},
+    "IQ4_XS": {"about": "Orca 4-bit i-quant", "download_gb": 97.5, "ram_gb": 100,
+               "arena_gb": 65.4, "families": ("orca",)},
     # the Coder release: 256 of the 512 experts kept (the ones code, tools and vision use), IQ2_S-IQ4_XS like IQ3_S
     "IQ1_M": {"about": "the Coder's only size: half the experts, stored like IQ3_S (3.5 bits)", "download_gb": 58.4,
               "ram_gb": 32, "arena_gb": 23.4, "families": ("coder",)},
@@ -136,6 +138,25 @@ FAMILIES = {
               "mmproj": "mmproj-Qwen3.8-Flash-Next-BF16.gguf", "name": "qwen3.8-flash-next-coder",
               "profile": "expert-profile-coder.bin"},
 }
+FAMILIES["orca"] = {
+    "title": "Orca Flash-Next Uncensored", "by": "OrcaRouter", "about": "uncensored fine-tune; BF16 compatibility conversion",
+    "hf": "https://huggingface.co/orcarouter/Qwen3.8-Flash-Next-Uncensored-GGUF/resolve/0434906af7b5202b676d43f108cf4f73d25691ef/",
+    "file": "Qwen3.8-Flash-Next-Uncensored-{q}-0000{i}-of-0000{parts}.gguf", "tag": "orca-",
+    "name": "orcarouter-qwen3.8-flash-next-uncensored", "mmproj": FAMILIES["qwen"]["mmproj"],
+    "mmproj_hf": FAMILIES["qwen"]["mmproj_hf"], "compat_bf16": True,
+}
+
+
+def model_shards(family, model, directory):
+    fam = FAMILIES[family]
+    parts = 3 if family == "orca" and model == "IQ4_XS" else 2
+    return [Path(directory) / fam["file"].format(q=model, i=i, parts=parts) for i in range(1, parts + 1)]
+
+
+def model_download_url(family, model):
+    return FAMILIES[family]["hf"].format(q=model)
+
+
 MMPROJ = "mmproj-Qwen3.8-Flash-Next-BF16.gguf"
 # EXPERIMENTAL, off by default (setup asks): a control vector shipped with the repository, see its README
 ESP_VECTOR = ROOT / "data" / "experimental-speed-projection" / "Qwen3.8-Flash-Next-experimental-speed-projection.gguf"
@@ -1991,6 +2012,7 @@ def main() -> int:
     ap.add_argument("--kv", choices=["int8", "q4_0", "k8v4"],
                     help="KV cache precision above 8K context: int8 (default), q4_0 (half the memory, a little less "
                          "precise) or k8v4 (hybrid: INT8 K + 4-bit V, 816 B/cell)")
+    ap.add_argument("--ple-io", choices=["direct", "mmap", "ram"], help="PLE lookup storage (Orca IQ4_XS defaults to RAM)")
     ap.add_argument("--vision", choices=["yes", "no", "none", "gpu", "cpu"],
                     help="let the model read images (yes = the encoder on the GPU)")
     ap.add_argument("--experimental-speed-projection", metavar="on|off|GGUF",
@@ -2074,6 +2096,13 @@ def main() -> int:
     # choice, and asked once when the PC has cards that could share the model
     run_gpu = start_gpus(a.gpus) or a.gpu
     port = a.port or 8080                              # a new install's port (issue #32: --port for an existing one)
+    selected = ROOT / f"strata-{FAMILIES[a.family or 'qwen']['tag']}{(a.model or '').lower()}.json"
+    if (os.environ.get("STRATA_UNIFIED_LAUNCHER") and a.model and selected in have
+            and not (a.setup or a.check or a.no_start or a.calibrate)):
+        if not a.build:
+            update_installed_engine(a.prebuilt)
+        return start(selected, a.port, run_gpu, yes=a.yes, layer_split=a.layer_split,
+                     keep={"host": a.host, "api_key": a.api_key, "draft_vocab": a.draft_vocab})
     if have and a.calibrate and not (a.setup or a.model or a.family or a.check):
         if not a.build:
             update_installed_engine(a.prebuilt)
@@ -2213,6 +2242,8 @@ def main() -> int:
             say(f"  {i}) {d['title']:20s} {d['by']} - {d['about']}")
         family = fams[int(ask("Which model?", [str(i) for i in range(1, len(fams) + 1)], "1", a.yes)) - 1]
     fam = FAMILIES[family]
+    if family == "orca":
+        MODELS["IQ3_XXS"] = {**MODELS["IQ3_XXS"], "download_gb": 85.2, "arena_gb": 53.5, "ram_gb": 70}
     ok(f"model: {fam['title']}")
     if fam.get("license"):
         say(f"  Its license: {fam['license']}")
@@ -2298,7 +2329,11 @@ def main() -> int:
         kv = ["int8", "q4_0"][int(ask("KV cache?", ["1", "2"], "1", a.yes)) - 1]
     if ctx > 8192:
         ok(f"KV cache: {'8-bit' if kv == 'int8' else '4-bit (Hadamard-rotated)'}")
-    if hip:
+    if family == "orca":
+        if a.vision not in (None, "no", "none"):
+            fail("Orca image support is not validated; use --vision none")
+        vision = "none"
+    elif hip:
         vision = "none"
         if a.vision not in (None, "no", "none"):
             warn("images are not available with the AMD backend yet: off")
@@ -2350,11 +2385,11 @@ def main() -> int:
         ok("experimental speed projection: " + ("ON (experimental)" if esp else "off"))
     elif esp_choice.lower() not in ("", "off", "no", "n", "0"):
         warn("the experimental speed projection is made for the original Qwen3.8-Flash-Next, not Swift 1.5: left off")
-    models_dir = Path(a.gguf_dir) if a.gguf_dir else Path(a.models_dir) / tag
-    shards = [models_dir / fam["file"].format(q=model, i=i) for i in (1, 2)]
+    models_dir = Path(a.gguf_dir) if a.gguf_dir else Path(a.models_dir) / (tag.lower() if family == "orca" else tag)
+    shards = model_shards(family, model, models_dir)
     if not a.gguf_dir and not all(sh.exists() and done(sh) for sh in shards):
         for r in elsewhere:                            # already downloaded in a Strata folder on another drive
-            cand = [r / "models" / tag / sh.name for sh in shards]
+            cand = [r / "models" / models_dir.name / sh.name for sh in shards]
             if all(c.exists() and done(c) for c in cand):
                 models_dir, shards = cand[0].parent, cand
                 ok(f"model files found in {models_dir}")
@@ -2413,7 +2448,7 @@ def main() -> int:
                     continue
                 except OSError:
                     pass
-            download(fam["hf"].format(q=model) + s.name, s)
+            download(model_download_url(family, model) + s.name, s)
     check_shards(shards)
     ok("model files present")
     mmproj = Path(a.models_dir) / fam["mmproj"]
@@ -2440,13 +2475,15 @@ def main() -> int:
         if not (pack / "tokenizer" / "vocab.json").exists():
             run([sys.executable, str(ROOT / "tools" / "strata_tokenizer.py"), "--gguf", str(shards[0]),
                  "--out", str(pack)], env=env)   # writes <pack>/tokenizer/
-    elif not (pack / "native_experts.txt").exists() or not (pack / "tokenizer" / "vocab.json").exists():
+    elif (not (pack / "native_experts.txt").exists() or not (pack / "tokenizer" / "vocab.json").exists()
+          or (fam.get("compat_bf16") and not (pack / "compat-bf16.json").exists())):
         # every tensor as the GGUF stores it; the experts are read from the GGUF at start (seconds to build)
-        run([sys.executable, str(ROOT / "tools" / "iq_pack.py"), "--gguf", str(shards[0]), "--out", str(pack)], env=env)
+        run([sys.executable, str(ROOT / "tools" / "iq_pack.py"), "--gguf", str(shards[0]), "--out", str(pack),
+             *(["--compat-bf16"] if fam.get("compat_bf16") else [])], env=env)
     if low_ram and not (pack / "experts.bin").exists():
         say(f"  Writing the experts into one file for the low-RAM mode (one time, {MODELS[model]['arena_gb']:.0f} GB) ...")
         run([sys.executable, str(ROOT / "tools" / "iq_pack.py"), "--gguf", str(shards[0]), "--out", str(pack),
-             "--experts-bin"], env=env)
+             "--experts-bin", *(["--compat-bf16"] if fam.get("compat_bf16") else [])], env=env)
     ok(f"model prepared: {pack}")
     mtp = (find_in(roots, "mtp/rt/experts.bin") or data / "mtp/rt/experts.bin").parent.parent
     rt = mtp / "rt"
@@ -2472,6 +2509,8 @@ def main() -> int:
             "--expert-profile", str(ROOT / "data" / fam.get("profile", "expert-profile.bin")), "--expert-cache", "auto",
             "--prefill", "auto", "--spec", "4", "--spec-min-p", "0.5", "--mtp", str(rt),
             "--max-context", str(ctx)]
+    if a.ple_io or (family == "orca" and model == "IQ4_XS" and not WIN):
+        args += ["--ple-io", a.ple_io or "ram"]
     if scaling is not None:     # the resolved config: explicit flags as given, or the automatic yarn+factor
         args += ["--rope-scaling", scaling, "--rope-scale", f"{rope_scale:g}"]
     if ctx > 8192:
@@ -2543,7 +2582,7 @@ def main() -> int:
         cfg["args"] = CAL.apply(cfg["args"], cal.get("settings") or {})
         ok("the settings tuned for this PC earlier are used" + (f" ({cal['date']})" if cal.get("date") else ""))
     cfg_path.write_text(json.dumps(cfg, indent=1), encoding="utf-8")
-    script = write_run_script(tag, cfg_path, port)
+    script = ROOT / "run-v100.sh" if os.environ.get("STRATA_UNIFIED_LAUNCHER") else write_run_script(tag, cfg_path, port)
     # offered only when someone answers: --yes installs and adopted earlier installs are not held up by it
     if cal is None and not hip and not a.no_start and not a.yes and ask(
             "Tune Strata for this PC now? It measures a few engine settings (about 5-10 minutes; the PC is busy "

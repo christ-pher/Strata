@@ -20,9 +20,9 @@ Tests use IQ4_XS/IQ4_NL fixtures, including truncated-shard rejection.
 Shared loader/PLE/GEMM/CPU regression tests and actual installed IQ3_S
 expert parity pass on the restored build.
 
-Prepare: `./setup-orca-v100.sh IQ4_XS`.
-Launch: `./run-orca-v100.sh IQ4_XS` (or `./run-v100.sh orca-iq4_xs`).
-Stop: `./stop-orca-v100.sh`.
+Prepare: `./run-v100.sh orca-iq4_xs --no-start`.
+Launch: `./run-v100.sh orca-iq4_xs`. Existing configs retain their settings; new installs default to 32K context. To reproduce the 262K configuration, prepare with `./run-v100.sh orca-iq4_xs --setup --context 262144 --no-start`.
+Stop: `./run-v100.sh stop`.
 
 Saved-prompt comparison command (requires other servers to be stopped):
 

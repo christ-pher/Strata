@@ -18,6 +18,16 @@ finish downloading before packing. Pass the snapshot filename, not its hash-name
 
 ## Preparation
 
+The shared launcher automates downloading, compatibility packing and MTP preparation:
+
+```sh
+./run-v100.sh orca --no-start
+./run-v100.sh orca
+./run-v100.sh stop
+```
+
+Use `orca-iq4_xs` for IQ4_XS. The steps below describe the manual compatibility workflow and its original IQ3_XXS validation.
+
 Build Strata normally using the pinned llama.cpp dependency. Python needs numpy, regex and gguf-py
 from that dependency (`STRATA_GGUF_PY` can point to its `gguf-py` directory).
 
@@ -83,7 +93,7 @@ does not establish this fine-tune's speed or accuracy.
 
 - IQ3_XXS is the target of this change; other Orca quantizations are not validated.
 - IQ3_M additionally uses Q5_0 expert down matrices, which the native GPU expert path does not support.
-- The installer model menu is unchanged. This is an explicit local packing workflow.
+- The shared installer offers Orca IQ3_XXS and IQ4_XS with compatibility packing.
 - Focused conversion and split-file tests: `.venv/bin/python -m unittest discover -s tools -p test_iq_pack.py`.
 - All eight packing tests, 17 server tests and the GPU gated-residual parity check passed.
 - The complete model packed successfully: 460 tensors converted, 1.39 GiB of converted BF16 weights;

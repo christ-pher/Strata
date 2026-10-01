@@ -12,7 +12,7 @@ The unchanged upstream README is preserved in [README.original.md](README.origin
 - **CUDA 12 selection:** setup selects a CUDA 12 toolkit for Volta, even when CUDA 13 is also installed. CUDA 13 cannot compile this GPU target. On Linux, setup selects a compatible GCC version when the default compiler is too new for the toolkit.
 - **BF16 prompt projections on older GPUs:** BF16 inputs expand to FP32 for tiled SGEMM, with a SIMT path for narrow products. This lets the V100 execute projections that use newer GPU features upstream.
 - **CPU feature handling:** expert dispatch selects AVX2 automatically on this EPYC VM and retains scalar fallback for guests without SIMD. Setup detects CPU changes and rebuilds native ggml objects with compiler-cache reuse bypassed.
-- **Orca compatibility:** the PLE loader retains the packed BF16 key produced by the compatibility conversion. Dedicated scripts prepare and launch Orca IQ3_XXS and IQ4_XS, including experts split across GGUF shards.
+- **Orca compatibility:** the PLE loader retains the packed BF16 key produced by the compatibility conversion. The shared launcher prepares and launches Orca IQ3_XXS and IQ4_XS, including experts split across GGUF shards.
 - **External model storage:** weights, prepared packs, MTP assets, and local settings live under `/opt/models/Strata`, outside the source checkout.
 - **V100 launchers and numerical checks:** reproducible launch defaults plus BF16 GEMM and scalar expert regression tests.
 
@@ -99,16 +99,17 @@ The launcher selects the supported repositories and shards. A matching quantizat
 
 Plan for both model shards, generated packs, MTP assets, and runtime memory. IQ2_XS downloads total about **63.4 GiB** and IQ3_S about **77.9 GiB** in logical file sizes; physical disk usage can differ. The large PLE lookup shard stays on disk, while expert execution uses system RAM and the GPU cache. More VRAM helps expert caching, but system RAM remains necessary.
 
+Use `--no-start` to prepare only, `--setup` to change saved settings (for example `--context 262144`), and `./run-v100.sh stop` to stop servers from this checkout. Existing configs are reused on normal starts.
+
 ### Orca compatibility setup
 
 ```sh
-./run-v100.sh IQ2_XS --no-start  # prepare the original MTP assets first
-./setup-orca-v100.sh            # download and pack Orca IQ3_XXS
-./run-orca-v100.sh
-./stop-orca-v100.sh
+./run-v100.sh orca --no-start            # download and pack Orca IQ3_XXS
+./run-v100.sh orca
+./run-v100.sh stop
 ```
 
-The Orca scripts require the `hf` CLI and use the documented BF16 compatibility conversion. To prepare or launch IQ4_XS, pass `IQ4_XS` to the setup or run script. IQ4_XS passed actual expert parity and a saved-prompt benchmark on the current AVX2 build. See [IQ4_XS validation](docs/ORCA-IQ4-XS.md) and the [historical Orca V100 notes](docs/ORCA-V100.md).
+The shared installer downloads Orca directly and applies the documented BF16 compatibility conversion. Use `orca-iq4_xs` to select IQ4_XS. MTP assets are prepared automatically; no original-model installation is required. IQ4_XS passed actual expert parity and a saved-prompt benchmark on the current AVX2 build. See [IQ4_XS validation](docs/ORCA-IQ4-XS.md) and the [historical Orca V100 notes](docs/ORCA-V100.md).
 
 ## Browser and API usage
 

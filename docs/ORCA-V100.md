@@ -1,15 +1,15 @@
 # Orca IQ3_XXS on this V100 VM
 
 This setup uses `orcarouter/Qwen3.8-Flash-Next-Uncensored-GGUF`, specifically the
-two IQ3_XXS shards. `setup-orca-v100.sh` downloads them and runs the documented
+two IQ3_XXS shards. `run-v100.sh orca --no-start` downloads them and runs the documented
 `--compat-bf16` conversion. The pack includes Orca's own tokenizer and references
-its original expert weights. The existing original-model MTP runtime is reused.
+its original expert weights. The shared MTP runtime is reused or prepared automatically.
 
 ```sh
 cd /opt/engines/Strata
-./setup-orca-v100.sh    # prepare/resume the download and pack
-./run-orca-v100.sh     # start the prepared model
-./stop-orca-v100.sh    # stop Orca, including a background instance
+./run-v100.sh orca --no-start    # prepare/resume the download and pack
+./run-v100.sh orca     # start the prepared model
+./run-v100.sh stop    # stop Orca, including a background instance
 ```
 
 `./run-v100.sh orca` also starts it; append `--no-start` to prepare only. Stop the current server with Ctrl+C before
@@ -19,7 +19,7 @@ The UI is http://10.0.20.99:8080 and API base URL is
 http://10.0.20.99:8080/v1. LAN access is unauthenticated, as authorized.
 
 Configuration: `strata-orca-iq3_xxs.json`; log: `strata-orca-iq3_xxs.log`.
-Defaults are 32K context, INT8 KV, 512-token prompt chunks, text input, MTP spec 4,
+Defaults are 32K context, INT8 KV, automatic prompt chunks, text input, MTP spec 4,
 and automatic GPU expert caching. The PLE table is in the first Orca shard.
 
 Weights: `/opt/models/Strata/models/orca-iq3_xxs/` (85.2 GB decimal).

@@ -54,7 +54,6 @@ build-vision.bat
 /data/models-download
 /data/runtime
 !/run-v100.sh
-!/run-orca-v100.sh
 
 # Local credentials, environment settings, and agent state
 .env

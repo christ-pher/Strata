@@ -41,11 +41,11 @@ Download every matching shard from the same release; preserve their filenames.
 Do not substitute Qwen3.8-27B or a different Qwen architecture.
 Safetensors/AWQ/GPTQ/EXL2 downloads are not direct inputs to this engine.
 
-OrcaRouter IQ3_XXS has a dedicated setup and launcher in this checkout:
-  ./setup-orca-v100.sh     download/resume and prepare
-  ./run-orca-v100.sh       start Orca (stop the other model first)
-  ./stop-orca-v100.sh      stop Orca, including the background test instance
-See docs/ORCA-V100.md. Other Orca quants are not validated; IQ3_M includes
+OrcaRouter uses the shared launcher in this checkout:
+  ./run-v100.sh orca --no-start     download/resume and prepare
+  ./run-v100.sh orca       start Orca (stop the other model first)
+  ./run-v100.sh stop      stop Orca, including the background test instance
+See docs/ORCA-V100.md. IQ4_XS is available as orca-iq4_xs; IQ3_M includes
 unsupported Q5_0 expert down matrices.
 Ask for a compatibility check before downloading an unfamiliar release.
 
