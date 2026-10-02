@@ -1,0 +1,186 @@
+{
+  "started_utc": "2026-10-02T17:22:23.073498+00:00",
+  "source_commit": "636d40e62924e8099f999c2e130c6596a850fc09",
+  "engine_sha256": "7e3d3cd2c6d432159bdf2e8d36316c82f1673464e51318e06da1cadfe0fca960",
+  "engine_build": {
+    "source": "local",
+    "version": "0.1.36",
+    "archs": [
+      70
+    ],
+    "vision": "gpu",
+    "cuda_dirs": [
+      "/usr/local/cuda-12.8/bin",
+      "/usr/local/cuda-12.8/lib64"
+    ],
+    "src": "d9291e0c9f5b8256",
+    "cpu_signature": "3fdc98038b8e0950",
+    "vision_src": "4d89409b228a1daa",
+    "source_commit": "636d40e plus v0.1.36 merge; see integrated_upstream"
+  },
+  "method": {
+    "repeats": 1,
+    "max_tokens": 128,
+    "temperature": 0,
+    "thinking": false,
+    "prompt_cache": 0,
+    "prefill_ring": 8,
+    "warmup_max_tokens": 128,
+    "average": "arithmetic mean of measured request rates",
+    "peak": "maximum complete-request rate; not instantaneous"
+  },
+  "models": {
+    "orca-iq4_xs": {
+      "configuration": {
+        "exe": "/opt/engines/Strata/engine/strata",
+        "args": [
+          "--pack",
+          "/opt/models/Strata/runtime/packs/orca-iq4_xs",
+          "--native",
+          "/opt/models/Strata/models/orca-iq4_xs/Qwen3.8-Flash-Next-Uncensored-IQ4_XS-00001-of-00003.gguf",
+          "--ple-gguf",
+          "/opt/models/Strata/models/orca-iq4_xs/Qwen3.8-Flash-Next-Uncensored-IQ4_XS-00001-of-00003.gguf",
+          "--expert-profile",
+          "/opt/engines/Strata/data/expert-profile.bin",
+          "--expert-cache",
+          "auto",
+          "--prefill",
+          "auto",
+          "--spec",
+          "4",
+          "--spec-min-p",
+          "0.5",
+          "--mtp",
+          "/opt/models/Strata/runtime/mtp/rt",
+          "--max-context",
+          "262144",
+          "--kv",
+          "int8",
+          "--kv-resident",
+          "32768",
+          "--ple-io",
+          "ram",
+          "--pool-workers",
+          "16",
+          "--prompt-cache",
+          "0",
+          "--pool-workers",
+          "16"
+        ],
+        "cwd": "/opt/engines/Strata",
+        "tokenizer": "/opt/models/Strata/runtime/packs/orca-iq4_xs/tokenizer",
+        "model_name": "orcarouter-qwen3.8-flash-next-uncensored-iq4_xs",
+        "lib_dirs": [
+          "/usr/local/cuda-12.8/lib64"
+        ],
+        "env": {
+          "STRATA_PREFILL_RING": "8",
+          "STRATA_EXPERT_USAGE_DIR": "/opt/engines/Strata/logs/expert-usage/orca-iq4_xs"
+        },
+        "host": "127.0.0.1",
+        "port": 18080,
+        "log": "/opt/engines/Strata/bench/results/2026-10-02-upstream-0136-after/orca-iq4_xs-engine.log"
+      },
+      "requests": [
+        {
+          "case": "code_review",
+          "repeat": 1,
+          "wall_seconds": 5.03736991400001,
+          "response": {
+            "id": "chatcmpl-8e30b2d99579486c9600f391",
+            "object": "chat.completion",
+            "created": 1790961794,
+            "model": "orcarouter-qwen3.8-flash-next-uncensored-iq4_xs",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "### Executive Summary\n\nThe `serve/frontend.py` module acts as the **normalization and templating layer** for an LLM serving engine. Its primary responsibility is to bridge the gap between diverse client API formats (OpenAI Chat Completions, Anthropic Messages) and a specific, internal model interface that expects raw token IDs and a Jinja-rendered chat template. It handles the translation of high-level concepts like \"reasoning effort\" and \"thinking budgets\" into specific template variables, ensuring that the downstream engine receives a consistent, deterministic input string. Crucially, it isolates the complex, frequently changing logic of prompt formatting from the"
+                },
+                "finish_reason": "length"
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 1124,
+              "completion_tokens": 128,
+              "total_tokens": 1252,
+              "prompt_tokens_details": {
+                "cached_tokens": 0
+              }
+            },
+            "timings": {
+              "cache_n": 0,
+              "prompt_n": 1124,
+              "prompt_ms": 2842.2,
+              "prompt_per_token_ms": 2.529,
+              "prompt_per_second": 395.5,
+              "predicted_n": 128,
+              "predicted_ms": 2179.9,
+              "predicted_per_token_ms": 17.03,
+              "predicted_per_second": 58.7,
+              "draft_n": 111,
+              "draft_n_accepted": 67
+            }
+          }
+        }
+      ],
+      "warmup": {
+        "response": {
+          "id": "chatcmpl-e97882ad4ef84001be0e3826",
+          "object": "chat.completion",
+          "created": 1790961792,
+          "model": "orcarouter-qwen3.8-flash-next-uncensored-iq4_xs",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "It is important to first clarify a common misconception in the premise of your question: **A standard Mixture-of-Experts (MoE) language model does not inherently \"share inference work\" between the GPU, System RAM, and CPU in the way that, for example, a hybrid CPU/GPU rendering pipeline might.**\n\nInstead, **MoE models primarily offload *memory* (weights) to System RAM or NVMe storage, while keeping *computation* (inference) on the GPU.** The CPU\u2019s role is largely orchestration and data movement, not primary computation.\n\nHere is a detailed, step-by-step explanation"
+              },
+              "finish_reason": "length"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 37,
+            "completion_tokens": 128,
+            "total_tokens": 165,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 37,
+            "prompt_ms": 426.7,
+            "prompt_per_token_ms": 11.532,
+            "prompt_per_second": 86.7,
+            "predicted_n": 128,
+            "predicted_ms": 2068.2,
+            "predicted_per_token_ms": 16.158,
+            "predicted_per_second": 61.9,
+            "draft_n": 107,
+            "draft_n_accepted": 74
+          }
+        },
+        "wall_seconds": 2.5108882919994358
+      },
+      "summary": {
+        "prompt": {
+          "average_tps": 395.5,
+          "peak_tps": 395.5,
+          "min_tps": 395.5,
+          "samples": 1
+        },
+        "decode": {
+          "average_tps": 58.7,
+          "peak_tps": 58.7,
+          "min_tps": 58.7,
+          "samples": 1
+        }
+      }
+    }
+  },
+  "finished_utc": "2026-10-02T17:23:26.119899+00:00",
+  "integrated_upstream": "v0.1.36 (36fa455)"
+}

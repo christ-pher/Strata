@@ -2,7 +2,7 @@
 
 A personal fork of [Niko1221/Strata](https://github.com/Niko1221/Strata), adapted to run **Qwen3.8-Flash-Next on a 32 GiB Volta GPU inside a Linux VM**, with EPYC 7402 host CPU passthrough (AVX2, FMA and F16C).
 
-This fork is based on **upstream 0.1.35 (`d9ab843`)**. It keeps Strata's browser UI, OpenAI-compatible and Anthropic-compatible APIs, expert caching, and MTP speculative decoding, with local changes for the V100 and this VM's CPU capabilities.
+This fork is based on **upstream 0.1.36 (`36fa455`)**. It keeps Strata's browser UI, OpenAI-compatible and Anthropic-compatible APIs, expert caching, and MTP speculative decoding, with local changes for the V100 and this VM's CPU capabilities.
 
 The unchanged upstream README is preserved in [README.original.md](README.original.md). Its performance figures describe upstream hardware; our measurements on this VM are in the [personal benchmarks](#personal-benchmarks-and-validation) below.
 
@@ -18,7 +18,7 @@ The unchanged upstream README is preserved in [README.original.md](README.origin
 
 The upstream integration retains compatibility with this fork's existing whitespace-separated v4 Orca manifests and corrects upstream prompt-attention dispatch to distinguish Volta sm70 from Turing sm75. New packs use upstream's comma-separated per-role shard format.
 
-Upstream 0.1.35 is merged in full, including client-disconnect cancellation, request validation, speculative-draft metrics, setup fixes, and CUDA/HIP compatibility improvements. Earlier features such as idle unload, conversation-cache options, and rope-scaling controls are retained. The validated target for this fork is the single-GPU Linux VM below; other upstream hardware and platforms retain their own setup documentation.
+Upstream 0.1.36 is merged in full, including client-disconnect cancellation, request validation, speculative-draft metrics, setup fixes, and CUDA/HIP compatibility improvements. Earlier features such as idle unload, conversation-cache options, and rope-scaling controls are retained. The validated target for this fork is the single-GPU Linux VM below; other upstream hardware and platforms retain their own setup documentation.
 
 The thinking repetition intervention is controlled by `"reasoning_repetition_guard": true` in the model config; it is disabled when omitted. See [configuration and behavior](docs/DETAILS.md#thinking-repetition-intervention).
 
@@ -214,3 +214,5 @@ The original Strata engine and documentation are by [Niko1221/Strata](https://gi
 Models are by Qwen, with supported compressed releases by ISTA-DASLab and fine-tunes by UkisAI and OrcaRouter. Strata uses parts of [llama.cpp / ggml](https://github.com/ggml-org/llama.cpp); upstream credits also acknowledge Splash, ninfer, and HyperQwen.
 
 Code is covered by the [MIT License](LICENSE), subject to the licenses of included components. The web font uses the SIL Open Font License; the experimental projection vector carries the Qwen Community License 1.0. Model files are external to this repository and retain their own licenses. See the [upstream credits and licenses](docs/DETAILS.md#credits-and-licenses).
+
+Upstream 0.1.36 adds fused prompt experts on sm80+ and cluster decode on sm90+. The V100 uses the previous kernels; see [integration notes](docs/UPSTREAM-0.1.36-MERGE.md). `./update.sh` updates without starting a model.
