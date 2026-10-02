@@ -7,7 +7,7 @@
 # CUDA targets support sm_70 and newer. Pre-Ampere devices use FP32 fallbacks for BF16 GEMM
 # and tensor-core QSA operations; Volta builds require a CUDA 12 toolkit.
 cmake_minimum_required(VERSION 3.24)
-project(strata VERSION 0.1.32 LANGUAGES CXX)
+project(strata VERSION 0.1.35 LANGUAGES CXX)
 add_compile_definitions(STRATA_VERSION="${PROJECT_VERSION}")
 # issue #31: release builds keep a PDB beside the exe (not shipped in it), so a minidump from a stalled engine can
 # be read back to the exact source line
@@ -360,6 +360,11 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
     target_link_libraries(native_dense_ple_key_test PRIVATE strata_engine)
     add_test(NAME native_dense_ple_key_test COMMAND native_dense_ple_key_test)
     set_tests_properties(native_dense_ple_key_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
+    # #369: per-layer admission on a sized (native pack) cache starts each layer in its own range
+    add_executable(expert_cache_per_layer_test tests/core/expert_cache_per_layer_test.cpp)
+    target_link_libraries(expert_cache_per_layer_test PRIVATE strata_engine)
+    add_test(NAME expert_cache_per_layer_test COMMAND expert_cache_per_layer_test)
+    set_tests_properties(expert_cache_per_layer_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
   endif()
   if(STRATA_BUILD_CONVERSATION_TESTS)
     add_executable(conversation_snapshot_test src/core/conversation_snapshot_test.cpp)
@@ -418,6 +423,15 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
       target_link_libraries(hip_handoff PRIVATE strata_kernels strata_hip_runtime)
       add_test(NAME hip_handoff COMMAND hip_handoff)
       list(APPEND _strata_hip_tests hip_handoff)
+    endif()
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/hip/mapped_alias.cpp")
+      # #325: reports what a hipHostGetDevicePointer alias is on this stack (on Windows: the host pointer, and a
+      # D2D copy into it does not land - hip_handoff's timeout there). A diagnosis: exits 0 whenever it ran.
+      add_executable(hip_mapped_alias tests/hip/mapped_alias.cpp)
+      target_link_libraries(hip_mapped_alias PRIVATE strata_kernels strata_hip_runtime)
+      add_test(NAME hip_mapped_alias COMMAND hip_mapped_alias)
+      set_tests_properties(hip_mapped_alias PROPERTIES SKIP_RETURN_CODE 77)
+      list(APPEND _strata_hip_tests hip_mapped_alias)
     endif()
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/hip/native_qsa_score.cpp")
       add_executable(hip_native_qsa_score tests/hip/native_qsa_score.cpp)

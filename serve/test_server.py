@@ -455,12 +455,87 @@ class ClientShapes(unittest.TestCase):
         for part in ("Be brief.", "Now use digits.", "Also this.", "1+1?"):
             self.assertIn(part, text)
 
+    def test_no_user_turn_is_a_400(self):
+        # #365: the template's own refusal (Qwen's "No user query found in messages." when no turn is a user's query)
+        # answers 400, not a dropped connection
+        with tempfile.TemporaryDirectory() as d:
+            tpl = Path(d) / "chat_template.jinja"
+            tpl.write_text("{% if messages[-1].role != 'user' %}{{ raise_exception('No user query found in messages.') }}"
+                           "{% endif %}{{ messages[-1].content }}", encoding="utf-8")
+            template, self.svc.template = self.svc.template, ChatTemplate(tpl)
+            try:
+                status, b = self.post("/v1/chat/completions", {
+                    "model": "x", "max_tokens": 20, "messages": [{"role": "system", "content": "Only a system."}]})
+                self.assertEqual(status, 400, b)
+                self.assertIn("No user query found", b["error"]["message"])
+            finally:
+                self.svc.template = template
+        status, b = self.post("/v1/chat/completions", {"model": "x", "max_tokens": 20,
+                                                       "messages": [{"role": "user", "content": "hi"}]})
+        self.assertEqual(status, 200, b)                            # the server goes on
+
+    def test_messages_as_a_json_string_over_http(self):
+        # #460: a double-encoded "messages" is answered; one that is not a list of objects is a 400, not a 500
+        encoded = json.dumps([{"role": "user", "content": "1+1?"}])
+        for path in ("/v1/chat/completions", "/v1/messages"):
+            with self.subTest(path=path):
+                status, b = self.post(path, {"model": "x", "max_tokens": 20, "messages": encoded})
+                self.assertEqual(status, 200, b)
+                self.assertIn("1+1?", self.prompt_text())
+                status, b = self.post(path, {"model": "x", "max_tokens": 20, "messages": ["hi"]})
+                self.assertEqual(status, 400, b)
+                self.assertIn("messages must be a list of objects", b["error"]["message"])
+
+    def test_vision_temp_image_removed_when_the_pipe_fails(self):
+        # #352: the temporary image goes even when the encoder's pipe raises
+        from serve.server import Vision
+
+        class Gone:
+            def write(self, _):
+                raise BrokenPipeError("the encoder is gone")
+
+        v = Vision.__new__(Vision)
+        v.dir, v.lock, v.cache = Path(tempfile.mkdtemp(prefix="strata-vision-test-")), threading.Lock(), {}
+        v.proc = mock.Mock(stdin=Gone())
+        with mock.patch.object(Vision, "load", return_value=b""), mock.patch.object(Vision, "normalize",
+                                                                                   return_value=b"png"):
+            with self.assertRaises(BrokenPipeError):
+                v.encode("x")
+        self.assertEqual(list(v.dir.iterdir()), [])
+        v.dir.rmdir()
+
     def test_leading_system_unchanged(self):
         from serve.frontend import anthropic_to_messages, openai_to_messages
         msgs, _, _ = openai_to_messages({"messages": [{"role": "developer", "content": "D"}, {"role": "user", "content": "u"}]})
         self.assertEqual([m["role"] for m in msgs], ["system", "user"])
         msgs, _, _ = anthropic_to_messages({"system": "S", "messages": [{"role": "user", "content": "u"}]})
         self.assertEqual([m["role"] for m in msgs], ["system", "user"])
+
+    def test_messages_sent_as_a_json_string(self):
+        # #460: a client that double-encodes "messages" (and "tool_calls") as a JSON string gets them decoded; what is
+        # still not a list of objects is a ValueError (the server's 400), not an AttributeError on m.get
+        from serve.frontend import anthropic_to_messages, openai_to_messages
+        call = [{"id": "c1", "type": "function", "function": {"name": "f", "arguments": "{\"x\": 1}"}}]
+        listed = [{"role": "user", "content": "u"}, {"role": "assistant", "content": "", "tool_calls": call}]
+        encoded = [listed[0], dict(listed[1], tool_calls=json.dumps(call))]
+        want = openai_to_messages({"messages": listed})[0]
+        self.assertEqual(want[1]["tool_calls"], [{"function": {"name": "f", "arguments": {"x": 1}}}])
+        self.assertEqual(openai_to_messages({"messages": json.dumps(listed)})[0], want)
+        self.assertEqual(openai_to_messages({"messages": json.dumps(encoded)})[0], want)
+        anth = [{"role": "user", "content": "u"}]
+        self.assertEqual(anthropic_to_messages({"messages": json.dumps(anth)})[0],
+                         anthropic_to_messages({"messages": anth})[0])
+        self.assertEqual(openai_to_messages({})[0], [])                     # no field: nothing, as before
+        self.assertEqual(openai_to_messages({"messages": None})[0], [])
+        for bad in ("not json", "\"a string\"", json.dumps({"role": "user"}), ["hi"], [{"role": "user"}, 3], 5,
+                    {"role": "user", "content": "u"}):
+            for fn in (openai_to_messages, anthropic_to_messages):
+                with self.subTest(bad=bad, fn=fn.__name__):
+                    with self.assertRaisesRegex(ValueError, "messages must be a list of objects"):
+                        fn({"messages": bad})
+        for calls in (["f"], "[1]", [{"function": "f"}], "{"):
+            with self.subTest(calls=calls), self.assertRaisesRegex(ValueError, "tool_calls must be a list of objects"):
+                openai_to_messages({"messages": [{"role": "assistant", "content": "", "tool_calls": calls}]})
 
 
 class SamplingKeys(unittest.TestCase):
@@ -503,6 +578,30 @@ class GpuChoice(unittest.TestCase):
         self.assertEqual(plain.get("CUDA_VISIBLE_DEVICES"), os.environ.get("CUDA_VISIBLE_DEVICES"))
         self.assertEqual(plain.get("CUDA_DEVICE_ORDER"), os.environ.get("CUDA_DEVICE_ORDER"))
 
+    def test_vision_device(self):
+        # #408: the image encoder on its own card; the engine's environment stays as it was
+        from serve.server import child_env, vision_env
+        cfg = {"gpu": [0, 1], "vision": {"exe": "v", "cuda_device": 2}}
+        env = child_env(cfg)
+        venv = vision_env(cfg, env)
+        self.assertEqual(venv["CUDA_VISIBLE_DEVICES"], "2")
+        self.assertEqual(venv["CUDA_DEVICE_ORDER"], "PCI_BUS_ID")
+        self.assertEqual(env["CUDA_VISIBLE_DEVICES"], "0,1")
+        plain = {"gpu": [0, 1], "vision": {"exe": "v"}}
+        self.assertIs(vision_env(plain, env), env)          # no cuda_device: the engine's environment, unchanged
+
+    def test_hip_ordinal(self):
+        """#325: on Windows the HIP ordinal setup resolved wins over the config's "gpu" (an iGPU takes HIP's 0)."""
+        from serve.server import child_env
+        self.assertEqual(child_env({"backend": "hip", "gpu": 1})["HIP_VISIBLE_DEVICES"], "1")       # Linux: KFD order
+        self.assertEqual(child_env({"backend": "hip", "hip_ordinal": 1})["HIP_VISIBLE_DEVICES"], "1")
+        self.assertEqual(child_env({"backend": "hip", "gpu": 0, "hip_ordinal": 1})["HIP_VISIBLE_DEVICES"], "1")
+        self.assertEqual(child_env({"backend": "hip", "gpu": [1, 0], "hip_ordinal": 2})["HIP_VISIBLE_DEVICES"],
+                         "1,0")                                          # a layer split keeps its list
+        self.assertEqual(child_env({"backend": "hip", "gpu": 0, "hip_ordinal": "x"})["HIP_VISIBLE_DEVICES"], "0")
+        plain = child_env({"backend": "hip"})
+        self.assertEqual(plain.get("HIP_VISIBLE_DEVICES"), os.environ.get("HIP_VISIBLE_DEVICES"))
+
 
 class RecordingPrompt(MockEngine):
     def generate(self, ids, max_new, sampling, cancel, embeddings=None):
@@ -530,6 +629,59 @@ class DyingEngine(MockEngine):
                 self.dead = True
                 raise EngineDied("the engine stopped unexpectedly (exit code -9)")
             yield t
+
+
+class SlowPromptEngine(MockEngine):
+    """Reads a "long prompt" for up to 20 s without a token (the engine sends nothing then), stopping on cancel."""
+
+    def generate(self, ids, max_new, sampling, cancel, embeddings=None):
+        self.cancelled_after = None
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 20:
+            if cancel.is_set():
+                self.cancelled_after = time.monotonic() - t0
+                return
+            time.sleep(0.05)
+        yield from super().generate(ids, max_new, sampling, cancel, embeddings)
+
+
+class ClientHangUp(unittest.TestCase):
+    """#430 #431: a client that hangs up during a long prompt read cancels the request within about a second -
+    non-streamed (which writes nothing until the end) and streamed (one keep-alive per prompt chunk) alike."""
+
+    @classmethod
+    def setUpClass(cls):
+        tok = ByteTokenizer()
+        cls.engine = SlowPromptEngine(tok, "</think>\n\nOK", max_context=CTX)
+        cls.svc = Service(cls.engine, tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
+        cls.httpd = serve(cls.svc, port=0)
+        cls.port = cls.httpd.server_address[1]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+
+    def hang_up(self, stream):
+        import socket as so
+        body = json.dumps({"model": "x", "max_tokens": 20, "stream": stream,
+                           "messages": [{"role": "user", "content": "a long prompt"}]}).encode()
+        c = so.create_connection(("127.0.0.1", self.port))
+        c.sendall(b"POST /v1/chat/completions HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+                  b"Content-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body)
+        time.sleep(1.0)
+        c.close()
+        t0 = time.monotonic()
+        while self.engine.cancelled_after is None and time.monotonic() - t0 < 10:
+            time.sleep(0.05)
+        self.assertIsNotNone(self.engine.cancelled_after, "the request was not cancelled")
+        self.assertLess(self.engine.cancelled_after, 3.0)
+
+    def test_non_streamed(self):
+        self.hang_up(False)
+
+    def test_streamed(self):
+        self.hang_up(True)
 
 
 class EngineDeath(unittest.TestCase):
@@ -593,6 +745,51 @@ class EngineDeath(unittest.TestCase):
         finally:
             httpd.shutdown()
             httpd.server_close()
+
+
+class DoneLineEngine(MockEngine):
+    """The mock engine whose `last` comes from a DONE line, parsed as StrataEngine parses it."""
+
+    def __init__(self, *a, done_lines=(), **kw):
+        super().__init__(*a, **kw)
+        self.done_lines = list(done_lines)
+
+    def generate(self, ids, max_new, sampling, cancel, embeddings=None):
+        try:
+            yield from super().generate(ids, max_new, sampling, cancel, embeddings)
+        finally:
+            StrataEngine._parse_done(self, self.done_lines.pop(0))
+
+
+class DraftCounts(unittest.TestCase):
+    """#457: GET /metrics gives each request's speculative draft counts (offered / accepted, from the engine's DONE
+    line; None when the line has no such fields) and their running sums in the totals."""
+
+    def test_drafts_in_history_and_totals(self):
+        tok = ByteTokenizer()
+        engine = DoneLineEngine(tok, "</think>\n\nok", max_context=CTX, done_lines=[
+            "DONE 4 20 40.0 30.0 stop 7 12 0",                  # 7 of 12 drafts accepted
+            "DONE 4 20 40.0 30.0 stop",                          # an engine that reports no drafts
+            "DONE 4 20 40.0 30.0 stop 3 5 0 9 10"])
+        svc = Service(engine, tok, ChatTemplate(ROOT / "serve/chat_template.jinja"))
+        self.assertEqual((svc.totals["drafts_offered"], svc.totals["drafts_accepted"]), (0, 0))
+        httpd = serve(svc, port=0)
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        try:
+            for _ in range(3):
+                body = json.dumps({"model": "m", "max_tokens": 10, "messages": [{"role": "user", "content": "hi"}]})
+                with urllib.request.urlopen(urllib.request.Request(base + "/v1/chat/completions", data=body.encode(),
+                                                                   headers={"Content-Type": "application/json"}),
+                                            timeout=30) as r:
+                    self.assertEqual(r.status, 200)
+            with urllib.request.urlopen(base + "/metrics", timeout=10) as r:
+                m = json.loads(r.read())
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+        rows = m["requests"]                                      # newest first
+        self.assertEqual([(r["drafts_offered"], r["drafts_accepted"]) for r in rows], [(5, 3), (None, None), (12, 7)])
+        self.assertEqual((m["totals"]["drafts_offered"], m["totals"]["drafts_accepted"]), (17, 10))
 
 
 class LiveRate(unittest.TestCase):

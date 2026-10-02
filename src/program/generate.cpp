@@ -273,6 +273,7 @@ struct Options {
     bool resident_pin = false;
     uint64_t resident_headroom = 8ull << 30;
     bool resident_soft = false;
+    bool resident_cpu_explicit = false;   ///< #384: --resident-cpu-experts given by itself (not only implied)
     /// CS-T `--resident-budget-gib N`: the resident mode with a RAM budget - the N GiB of experts the GPU cache does
     /// not hold that the expert profile ranks hottest are copied into RAM, the rest are read from the files in place
     /// (the GGUF shards when the pack has no experts.bin).  0 = the whole complement (--resident-experts).
@@ -1216,7 +1217,7 @@ int main(int argc, char** argv) {
         else if (a == "--gpu-stages") o.gpu_stages = true;
         else if (a == "--mmap-experts") o.mmap_experts = true;
         else if (a == "--shared-expert-arena") o.shared_expert_arena = next("--shared-expert-arena");
-        else if (a == "--resident-cpu-experts") o.resident_cpu_experts = true;
+        else if (a == "--resident-cpu-experts") o.resident_cpu_experts = o.resident_cpu_explicit = true;
         else if (a == "--resident-experts") {
             o.mmap_experts = o.resident_cpu_experts = o.resident_pin = o.resident_soft = true;
             o.resident_headroom = 4ull << 30;
@@ -1324,9 +1325,20 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "strata generate: --resident-cpu-experts requires --mmap-experts and a static --expert-profile\n");
         return 2;
     }
-    if (o.resident_cpu_experts &&
-        (!o.layer_split.empty() || o.expert_cache_remote[0] > 0 || o.expert_cache_remote[1] > 0 ||
-         o.expert_cache_remote[2] > 0)) {
+    const bool remote_caches = o.expert_cache_remote[0] > 0 || o.expert_cache_remote[1] > 0 ||
+                               o.expert_cache_remote[2] > 0;
+    if (o.resident_cpu_experts && !o.layer_split.empty() && !remote_caches && o.resident_soft &&
+        !o.resident_cpu_explicit && o.resident_budget == 0) {
+        // #364 #384: setup's --resident-experts with a layer split (--gpus at start, or a config edited by hand) runs
+        // as the plain mmap mode - the placement those users measured 1.3-1.6x faster than one GPU - instead of
+        // refusing.  Exactly --mmap-experts: nothing else reads these flags (the headroom only sizes the copy).
+        std::fprintf(stderr, "strata generate: WARNING: the resident RAM mode (--resident-experts) does not support a "
+                             "layer split yet: the experts the GPUs do not hold are read through the OS file cache "
+                             "(--mmap-experts), and RAM may fill up during long prompts\n");
+        o.resident_cpu_experts = o.resident_pin = o.resident_soft = false;
+        o.resident_headroom = 8ull << 30;
+    }
+    if (o.resident_cpu_experts && (!o.layer_split.empty() || remote_caches)) {
         std::fprintf(stderr, "strata generate: --resident-cpu-experts does not support layer splits or remote expert caches\n");
         return 2;
     }
@@ -2537,6 +2549,14 @@ int main(int argc, char** argv) {
         const char* name = named && p.name[0] ? p.name : "(an unnamed GPU)";
 #if defined(STRATA_USE_HIP)
         std::fprintf(stderr, "strata generate: GPU %d: %s (%s)\n", dev, name, named ? p.gcnArchName : "?");
+#if defined(_WIN32)
+        // #468 #461: which HIP runtime was loaded - the bundled one beside the exe, or an AMD driver's System32 copy
+        if (HMODULE h = GetModuleHandleA("amdhip64_7.dll")) {
+            char path[MAX_PATH] = {};
+            if (GetModuleFileNameA(h, path, MAX_PATH) > 0)
+                std::fprintf(stderr, "strata generate: HIP runtime %s\n", path);
+        }
+#endif
 #else
         std::fprintf(stderr, "strata generate: GPU %d: %s, compute capability %d.%d%s\n", dev, name,
                      strata::cc_major_of(p.major), strata::cc_minor_of(p.minor),
@@ -2678,16 +2698,20 @@ int main(int argc, char** argv) {
         const int64_t reserve = ((int64_t) o.vram_reserve_mib + prefill_mib) << 20;
         const int64_t fit = std::max<int64_t>(((int64_t) free_b - reserve) / (int64_t) strata::kernels::cpu::expert_layout().max_blob, 0);
         if (o.expert_cache > fit) {
-            std::fprintf(stderr, "strata generate: layer split: --expert-cache %d leaves no room for the prompt path's "
-                                 "buffers (%lld MiB) on CUDA0: %lld slots\n", o.expert_cache, (long long) prefill_mib,
-                         (long long) fit);
+            // a WARNING that names the knob: the user asked for this size, and gets fewer slots
+            std::fprintf(stderr, "strata generate: WARNING: layer split: --expert-cache %d leaves no room for the "
+                                 "prompt path's buffers (%lld MiB) and the %d MiB reserve on CUDA0: %lld slots instead "
+                                 "(a smaller --vram-reserve-mib leaves more of them)\n", o.expert_cache,
+                         (long long) prefill_mib, o.vram_reserve_mib, (long long) fit);
             o.expert_cache = (int) fit;
         }
     }
     // plan v0.3 P6: a native pack's blobs differ per layer, so with a profile its slots are sized per pair: the
     // same VRAM holds ~30% more IQ3_XXS experts than slots of the largest blob would
+    // #369: not with --expert-cache-per-layer - its per-layer slot ranges ignore the profile rank a sized slot was cut
+    // for, so a layer's larger blob could land in a smaller slot: that mode keeps slots of the largest blob
     std::vector<int64_t> sized_slots;
-    if (native_pack && o.expert_cache > 0 && !profile.empty()) {
+    if (native_pack && o.expert_cache > 0 && !profile.empty() && !o.expert_cache_per_layer) {
         size_t free_b = 0, total_b = 0;
         cudaMemGetInfo(&free_b, &total_b);
         const auto& lay = strata::kernels::cpu::expert_layout();
@@ -2826,10 +2850,17 @@ int main(int argc, char** argv) {
     // the policy rather than a hint.
     int64_t prefilled = 0;
     if (!profile.empty() && srcp != nullptr) {
-        const int64_t want = std::min<int64_t>((int64_t) profile.size(), xcache.slots());
+        // #369 (dag08): per layer, a full layer skips only its own pairs - each layer takes its hottest experts until
+        // its range is full (one full layer used to end the whole fill, leaving most layers empty)
+        const bool per_layer = xcache.per_layer_admission();
+        const int64_t want = per_layer ? (int64_t) profile.size()
+                                       : std::min<int64_t>((int64_t) profile.size(), xcache.slots());
         for (int64_t i = 0; i < want; ++i) {
             const int32_t slot = xcache.admit(profile[(size_t) i].first, profile[(size_t) i].second);
-            if (slot == strata::core::kNotResident) break;
+            if (slot == strata::core::kNotResident) {
+                if (per_layer) continue;
+                break;
+            }
             const uint8_t* b = srcp->blob(profile[(size_t) i].first, profile[(size_t) i].second);
             if (b == nullptr || !xcache.fill_slot_blocking(slot, b, err,
                     (int64_t) strata::kernels::cpu::expert_layout().blob_bytes(profile[(size_t) i].first))) {
@@ -2850,7 +2881,7 @@ int main(int argc, char** argv) {
         }
         mem_mark("the profile fill");
         std::fprintf(stderr, "strata generate: pre-filled %lld of %lld slots from the profile; slot 0 verified\n",
-                     (long long) prefilled, (long long) want);
+                     (long long) prefilled, (long long) (per_layer ? xcache.slots() : want));
     }
 
     for (auto& stp : stages) {
@@ -3762,8 +3793,26 @@ int main(int argc, char** argv) {
             const int64_t k = plan_lend(chunk);
             if (k > 0) lend_from = xcache.slots() - k;
         }
-        if (src.pin_cache_complement(xcache, err, o.resident_pin, {}, lend_from, o.resident_headroom,
-                                     o.resident_budget, &profile)) {
+        bool resident_ok = src.pin_cache_complement(xcache, err, o.resident_pin, {}, lend_from, o.resident_headroom,
+                                                    o.resident_budget, &profile);
+        std::string whole_err;
+        if (!resident_ok && o.resident_soft) {
+            // #467: the whole complement does not fit - keep what does, the hottest by the profile, through the #403
+            // budget path (sized by the RAM alone) instead of none: the misses outside it read the same file bytes
+            // the mmap fallback reads, so the answers are unchanged.  Nothing pinned: the old fallback below.
+            whole_err = err;
+            resident_ok = src.pin_cache_complement(xcache, err, o.resident_pin, {}, -1, o.resident_headroom,
+                                                   strata::core::FileExpertSource::kResidentWhatFits, &profile);
+            if (resident_ok)
+                std::fprintf(stderr, "strata generate: WARNING: the whole resident RAM mode does not fit (%s); %.2f "
+                                     "GiB of the experts the GPU does not hold, the hottest by the expert profile, are "
+                                     "kept in RAM and the rest are read from the model folder through the OS file "
+                                     "cache\n",
+                             whole_err.c_str(), (double) src.resident_bytes() / 1073741824.0);
+            else
+                err = whole_err + "; " + err;
+        }
+        if (resident_ok) {
             if (o.adapt_every > 0 && o.adapt_swaps > 0 &&
                 !src.reserve_exchanges(std::min<int64_t>(o.adapt_swaps, 96), err)) {
                 std::fprintf(stderr, "strata generate: CPU expert residency: %s\n", err.c_str());
@@ -3780,6 +3829,12 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "strata generate: WARNING: the resident RAM mode does not fit (%s); the experts the "
                                  "GPU does not hold are read from the model folder through the OS file cache "
                                  "(--mmap-experts), which is slower when the RAM cannot keep them\n", err.c_str());
+        } else if (o.resident_budget > 0) {
+            // #403: a RAM budget that cannot be kept is not a reason to stop - the experts it would have held are
+            // read from the files like the ones outside it (pin_cache_complement leaves nothing half-built)
+            std::fprintf(stderr, "strata generate: WARNING: the RAM budget (--resident-budget-gib) cannot be kept (%s); "
+                                 "every expert the GPU does not hold is read from the model files through the OS file "
+                                 "cache (--mmap-experts), which is slower\n", err.c_str());
         } else {
             std::fprintf(stderr, "strata generate: CPU expert residency: %s\n", err.c_str());
             return 1;
@@ -3863,24 +3918,62 @@ int main(int argc, char** argv) {
             // 128-slot floor.  The percentage cap is an AUTO-chunk rule and only the auto scan applies it - an
             // explicit --prefill is the operator's number, and a loan of it only has to fit.  With one participant
             // (no split) this reduces to plan_lend exactly, so the single-GPU loan is unchanged from main.
-            auto fits = [&](int64_t c, bool cap) -> bool {
-                for (const PfPart& p : pf_parts) {
-                    const int64_t k = part_slots(p, c);
-                    if (k <= 0 || k + 128 > p.cache->slots()) return false;
-                    if (cap && k * 100 > kAutoLendPct * p.cache->slots()) return false;
-                }
+            auto fits_one = [&](const PfPart& p, int64_t c, bool cap) -> bool {
+                const int64_t k = part_slots(p, c);
+                if (k <= 0 || k + 128 > p.cache->slots()) return false;
+                return !(cap && k * 100 > kAutoLendPct * p.cache->slots());
+            };
+            // `only`: CUDA0's cache alone (#448: what one GPU would choose, for the log below); null: every one
+            auto fits = [&](int64_t c, bool cap, const PfPart* only = nullptr) -> bool {
+                if (only != nullptr) return fits_one(*only, c, cap);
+                for (const PfPart& p : pf_parts)
+                    if (!fits_one(p, c, cap)) return false;
                 return true;
             };
             static constexpr int64_t kAutoChunks[] = {32768, 16384, 8192, 6144, 4096, 3072, 2048, 1024, 512, 256};
-            int64_t chunk = 0;
-            if (o.prefill_auto) {
-                for (const int64_t c : kAutoChunks) {
-                    if (c > 8192 && (c > o.prefill_auto_max || c > o.max_context)) continue;   // #282, as plan_lend
-                    if (fits(c, true)) { chunk = c; break; }
+            auto pick = [&](const PfPart* only) -> int64_t {
+                if (o.prefill_auto) {
+                    for (const int64_t c : kAutoChunks) {
+                        if (c > 8192 && (c > o.prefill_auto_max || c > o.max_context)) continue;   // #282, as plan_lend
+                        if (fits(c, true, only)) return c;
+                    }
+                } else {
+                    for (int64_t c = o.prefill_chunk; c >= 256; c /= 2)
+                        if (fits(c, false, only)) return c;
                 }
-            } else {
-                for (int64_t c = o.prefill_chunk; c >= 256; c /= 2)
-                    if (fits(c, false)) { chunk = c; break; }
+                return 0;
+            };
+            const int64_t chunk = pick(nullptr);
+            // #448: a small card in a layer split caps every stage's chunk (an RTX 3080's 512-slot cache held a
+            // 32 GB card's split to 512 tokens: prompts 6.2x slower, decode the same).  Named when it bites, so the
+            // regression is one log line: each stage that cannot fund the chunk CUDA0 alone would read in.
+            if (pf_parts.size() > 1) {
+                const int64_t alone = pick(&pf_parts[0]);
+                if (alone > chunk) {
+                    for (size_t i = 1; i < pf_parts.size(); ++i) {
+                        const PfPart& p = pf_parts[i];
+                        if (fits_one(p, alone, o.prefill_auto)) continue;
+                        const int dev = p.dev < 0 ? 0 : p.dev;
+                        cudaDeviceProp prop{};
+                        if (cudaGetDeviceProperties(&prop, dev) != cudaSuccess) {
+                            (void) cudaGetLastError();
+                            prop.name[0] = 0;
+                        }
+                        const std::string pct =
+                            o.prefill_auto ? ", and lend at most " + std::to_string(kAutoLendPct) + "%" : "";
+                        std::fprintf(stderr, "strata serve: WARNING: prompt chunk %lld tokens, not %lld: CUDA%d (%s) "
+                                             "has %lld expert-cache slots, and a %lld-token chunk borrows %lld of them "
+                                             "(it must keep 128%s) - prompts read slower than on CUDA0 alone (#448)\n",
+                                     (long long) chunk, (long long) alone, dev, prop.name,
+                                     (long long) p.cache->slots(), (long long) alone,
+                                     (long long) part_slots(p, alone), pct.c_str());
+                        // the helper tiers start at CUDA1 without a split (and are enabled in order)
+                        std::fprintf(stderr, "strata serve:   a card this small can serve as a helper expert cache "
+                                             "instead of a split stage: without --layer-split, with %s "
+                                             "(docs/SECOND_GPU.md)\n",
+                                     dev == 1 ? "--expert-cache-device1 N" : "--expert-cache-device1..3 N, in order");
+                    }
+                }
             }
             if (chunk > 0) {
                 if (o.prefill_auto)

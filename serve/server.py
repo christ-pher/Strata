@@ -31,7 +31,9 @@ import json
 import os
 import queue
 import re
+import select
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -49,6 +51,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT))   # run as a script (run-<model>.bat) as well as a module
 from serve.frontend import (ChatTemplate, Event, OutputParser, anthropic_to_messages,  # noqa: E402
                             images_of, openai_to_messages)
+from serve.reasoning_guard import ReasoningRepetitionGuard  # noqa: E402
 from serve.mcp import McpCancelled, hub_from_config  # noqa: E402
 from serve.winjob import contain  # noqa: E402
 from serve.structured import StructuredOutputError, prepare_format, validated_json  # noqa: E402
@@ -585,10 +588,12 @@ class Vision:
                 return self.cache[key]
             img, out = self.dir / f"{key}.img", self.dir / f"{key}.sve"
             img.write_bytes(data)
-            self.proc.stdin.write(f"ENC {img} {out}\n")
-            self.proc.stdin.flush()
-            line = self.proc.stdout.readline().strip()
-            img.unlink(missing_ok=True)
+            try:
+                self.proc.stdin.write(f"ENC {img} {out}\n")
+                self.proc.stdin.flush()
+                line = self.proc.stdout.readline().strip()
+            finally:                                                   # #352: also when the encoder's pipe is gone
+                img.unlink(missing_ok=True)
             if not line.startswith("OK"):
                 raise ValueError("the image could not be read: " + (line[4:] if line.startswith("ERR") else
                                                                      "the vision encoder stopped"))
@@ -629,12 +634,28 @@ def engine_args(cfg: dict) -> list[str]:
     return args
 
 
+def hip_visible(cfg: dict) -> list[int]:
+    """AMD: the devices the engine should see, as the HIP runtime numbers them (HIP_VISIBLE_DEVICES).
+
+    On Linux setup's KFD order is HIP's order, so the config's "gpu" is it.  On Windows setup finds the cards in the
+    display-adapter order, and an integrated Radeon that HIP also enumerates takes ordinal 0 and pushes the discrete
+    card to 1 (#325): setup records the ordinal `strata-device --list-devices` gave the card as "hip_ordinal", which
+    wins for a one-card config.  Without it (a config from before), the config's "gpu"."""
+    ordinal = cfg.get("hip_ordinal")
+    if ordinal is not None and str(ordinal).strip() != "" and len(gpu_list(cfg)) <= 1:
+        try:
+            return [int(str(ordinal).strip())]
+        except ValueError:
+            pass
+    return gpu_list(cfg)
+
+
 def child_env(cfg: dict) -> dict:
     """The engine's environment: the CUDA libraries setup installed (pip's nvidia packages, or the toolkit that
     compiled it) first on the library search path."""
     env = dict(os.environ)
-    if gpu_list(cfg) and cfg.get("backend") == "hip":   # AMD: numbered as HIP numbers them (setup's KFD order)
-        env["HIP_VISIBLE_DEVICES"] = ",".join(str(i) for i in gpu_list(cfg))
+    if hip_visible(cfg) and cfg.get("backend") == "hip":   # AMD: numbered as HIP numbers them (hip_visible)
+        env["HIP_VISIBLE_DEVICES"] = ",".join(str(i) for i in hip_visible(cfg))
     elif gpu_list(cfg):                              # issue #51: the GPU(s) to run on, numbered as nvidia-smi does; CUDA's
         env["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"      # own default order (fastest first) can number the cards otherwise
         env["CUDA_VISIBLE_DEVICES"] = ",".join(str(i) for i in gpu_list(cfg))
@@ -644,6 +665,22 @@ def child_env(cfg: dict) -> dict:
     if dirs:
         var = "PATH" if os.name == "nt" else "LD_LIBRARY_PATH"
         env[var] = os.pathsep.join(dirs + ([env[var]] if env.get(var) else []))
+    return env
+
+
+def vision_env(cfg: dict, env: dict) -> dict:
+    """The image encoder's environment: the engine's, unless the config's vision section names its own "cuda_device"
+    (numbered like nvidia-smi) - then the encoder runs on that card alone, so a spare GPU can hold it while the engine
+    keeps all of its own cards' VRAM (#408, Efs-O).  Without it, nothing changes."""
+    dev = (cfg.get("vision") or {}).get("cuda_device")
+    if dev is None:
+        return env
+    env = dict(env)
+    if cfg.get("backend") == "hip":
+        env["HIP_VISIBLE_DEVICES"] = str(dev)
+    else:
+        env["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+        env["CUDA_VISIBLE_DEVICES"] = str(dev)
     return env
 
 
@@ -729,7 +766,8 @@ class Service:
         self.history = collections.deque(maxlen=500)    # the last finished requests, newest last (GET /metrics)
         # since the server started (the Monitor's totals, issue #35)
         self.totals = {"since": time.time(), "requests": 0, "prompt_tokens": 0, "reused": 0, "output_tokens": 0,
-                       "prompt_ms": 0.0, "decode_ms": 0.0}
+                       "prompt_ms": 0.0, "decode_ms": 0.0,
+                       "drafts_offered": 0, "drafts_accepted": 0}   # #457: the MTP drafts, summed where reported
         self.last_timings = None                         # the last finished request's, llama.cpp's names (/v1/status)
         self.last_request_at = None                      # when a request last started or finished
         self.started_at = time.time()
@@ -741,6 +779,7 @@ class Service:
         self.idle_unload_s = 0
         self.min_free_vram_mib = 0
         self.before_load = None
+        self.reasoning_repetition_guard = False          # opt-in exact token repetition intervention
         self.reasoning_budget_tokens = 0                 # #123: the config's default thinking budget (0: none)
         self.anthropic_think_unasked = True               # #278: "anthropic_thinking": "on_request" -> False
         self.stop_ids = set(tokenizer.encode(IM_END, parse_special=True) +
@@ -1174,6 +1213,8 @@ class Service:
     def run(self, ids, thinking, tools, max_new, sampling, cancel) -> Iterator[tuple[str, object]]:
         """Yields ("event", Event) as text arrives, then ("done", {"finish": .., "completion_tokens": ..})."""
         budget = self.reasoning_budget(sampling) if thinking else None   # #123: opt-in, off by default
+        guard = ReasoningRepetitionGuard() if thinking and self.reasoning_repetition_guard else None
+        intervention = None
         defaults = {**self.sampling_defaults, **self.shared}   # the config's, then the Chat settings shared with apps
         if defaults:                   # the request's own fields win (explicit 0 stays greedy)
             req_values = {k: v for k, v in (sampling or {}).items() if v is not None}
@@ -1234,10 +1275,14 @@ class Service:
                                 last_print = self._progress(last_print)
                                 for ev in evs:
                                     yield "event", ev
-                                if budget and parser.state == "reasoning":
+                                if parser.state == "reasoning":
                                     thought += 1
-                                    # at a clean point: no tag held back, no character split across tokens
-                                    if thought >= budget and not parser.buf and not detok.pending():
+                                    if guard and guard.push(t):
+                                        intervention = "repeated thinking detected"
+                                    if budget and thought >= budget:
+                                        intervention = f"thinking budget reached ({thought} tokens)"
+                                    # Finish tags and UTF-8 characters before inserting the wrap-up.
+                                    if intervention and not parser.buf and not detok.pending():
                                         wrap = True
                                         break
                         except EngineDied as e:
@@ -1257,15 +1302,15 @@ class Service:
                             #                             queue mid-drain for the next request to read as its own DONE
                         if not wrap or cancel.is_set():
                             break
-                        # #123: the thinking reached reasoning_budget_tokens.  Close it the way the model would (a
-                        # short wrap-up and </think>) and let it answer: the next pass's prompt is this one plus what
+                        # A thinking budget or repetition check requested intervention. Close it with a
+                        # short wrap-up and </think> and let it answer: the next pass's prompt is this one plus what
                         # was generated plus the wrap-up, so the engine continues from the prefix it already holds.
                         budget = None
+                        guard = None  # one intervention per run; never inspect answer tokens
                         extra = self.tok.encode(REASONING_WRAP_UP, parse_special=True)
                         if max_new - n - len(extra) < 1:
                             break                       # no room left to answer: "length", as without a budget
-                        print(f"[strata] thinking budget reached ({thought} tokens): wrapping up the thinking",
-                              flush=True)
+                        print(f"[strata] {intervention}: wrapping up the thinking", flush=True)
                         for t in extra:
                             n += 1
                             raw_ids.append(t)
@@ -1302,7 +1347,10 @@ class Service:
                                 "decode_tok_s": round(last["generated"] / (last["decode_ms"] / 1000), 1)
                                 if n and last.get("generated") and last.get("decode_ms") else None,
                                 "hit_rate": hit_rate, "ram_blobs": last.get("ram_blobs"),
-                                "file_blobs": last.get("file_blobs"), "file_mb": last.get("file_mb")})
+                                "file_blobs": last.get("file_blobs"), "file_mb": last.get("file_mb"),
+                                # #457: the speculative drafts from the DONE line (None: the engine did not say)
+                                "drafts_offered": last.get("drafts_offered"),
+                                "drafts_accepted": last.get("drafts_accepted")})
                             t = self.totals
                             t["requests"] += 1
                             t["prompt_tokens"] += len(ids)
@@ -1310,6 +1358,8 @@ class Service:
                             t["output_tokens"] += n
                             t["prompt_ms"] += last.get("prompt_ms") or 0.0
                             t["decode_ms"] += last.get("decode_ms") or 0.0
+                            t["drafts_offered"] += last.get("drafts_offered") or 0
+                            t["drafts_accepted"] += last.get("drafts_accepted") or 0
                             fresh = getattr(self.engine, "last", None)
                             if fresh is not None and fresh is not before:      # the engine's clock for THIS request
                                 timings = request_timings(len(ids), n, last)
@@ -1688,9 +1738,35 @@ def make_handler(svc: Service):
         protocol_version = "HTTP/1.0"                       # SSE ends by closing the connection
 
         record = None                                       # #332: this request's monitor record, if kept
+        watch_done = None                                   # #430 #431: stops this request's disconnect watcher
 
         def log_message(self, fmt, *args):
             pass
+
+        def _watch_client(self, cancel: threading.Event) -> None:
+            """#430 #431: cancel the request as soon as its client hangs up.  A non-streamed request writes nothing
+            until it ends, and a streamed one only a keep-alive per prompt chunk (and the first write after a hang-up
+            usually still succeeds), so a dropped request kept the engine busy until its answer or the whole prompt
+            was done.  Every 0.5 s: the socket readable with nothing to read (EOF) means the client closed it.  A
+            request is HTTP/1.0 and fully read here, so no later bytes are expected - data is not a hang-up."""
+            done = self.watch_done = threading.Event()
+            sock = self.connection
+
+            def watch():
+                while not done.wait(0.5) and not cancel.is_set():
+                    try:
+                        readable, _, _ = select.select([sock], [], [], 0)
+                        gone = bool(readable) and sock.recv(1, socket.MSG_PEEK) == b""
+                    except (ConnectionError, TimeoutError):
+                        gone = True
+                    except (OSError, ValueError):            # the socket was closed here: the request has ended
+                        return
+                    if gone:
+                        self._note(outcome="disconnected")
+                        cancel.set()
+                        return
+
+            threading.Thread(target=watch, daemon=True, name="strata-client-watch").start()
 
         def _note(self, **values):
             """#332: what the monitor shows about this request (nothing when the monitor is off)."""
@@ -1944,6 +2020,8 @@ def make_handler(svc: Service):
                 self._note(outcome="disconnected")
                 raise                                        # as before #332: the server's own handling
             finally:
+                if self.watch_done is not None:
+                    self.watch_done.set()
                 record = self.record
                 if record is not None:
                     with svc.status_lock:
@@ -2073,6 +2151,7 @@ def make_handler(svc: Service):
             ids, thinking, max_new = svc.prepare(messages, tools, kw, max_new)
             _debug_req("openai", req, messages, tools, max_new, thinking, len(ids))
             cancel = threading.Event()
+            self._watch_client(cancel)                       # #430 #431
             run = run_with_mcp(svc, svc.mcp, messages, tools, kw, ids, thinking, max_new, max_req, req, cancel,
                                {t["name"] for t in extra}) if use_mcp else None
             chunks = openai_chunks(svc, req, ids, thinking, tools, max_new, cancel, run=run)
@@ -2124,6 +2203,7 @@ def make_handler(svc: Service):
             ids, thinking, max_new = svc.prepare(messages, tools, kw, max_new)
             _debug_req("anthropic", req, messages, tools, max_new, thinking, len(ids))
             cancel = threading.Event()
+            self._watch_client(cancel)                       # #430 #431
             events = anthropic_events(svc, req, ids, thinking, tools, max_new, cancel)
             events = self._capture(events, "anthropic")
             if not req.get("stream"):
@@ -2412,7 +2492,8 @@ def main() -> int:
             vcfg = {k: (os.path.abspath(os.path.join(cfg.get("cwd") or ".", v))
                         if k in ("exe", "mmproj", "model") and isinstance(v, str) and not os.path.isabs(v) else v)
                     for k, v in cfg["vision"].items()}
-            vision = Vision(vcfg, log=open(cfg["log"], "a", encoding="utf-8") if cfg.get("log") else None, env=env)
+            vision = Vision(vcfg, log=open(cfg["log"], "a", encoding="utf-8") if cfg.get("log") else None,
+                            env=vision_env(cfg, env))
         print("model unloaded; the first request loads it ..." if lazy else
               "loading the model (the first start takes a minute or two) ...", flush=True)
         if len(gpu_list(cfg)) > 1:
@@ -2463,6 +2544,12 @@ def main() -> int:
     if mode not in ("model", "on_request"):
         raise SystemExit(f"[strata] config anthropic_thinking must be \"model\" or \"on_request\", not {mode!r}")
     svc.anthropic_think_unasked = mode == "model"
+    guard_enabled = cfg.get("reasoning_repetition_guard", False)
+    if not isinstance(guard_enabled, bool):
+        raise SystemExit("[strata] reasoning_repetition_guard must be true or false")
+    svc.reasoning_repetition_guard = guard_enabled
+    if guard_enabled:
+        print("[strata] thinking repetition intervention enabled", flush=True)
     if cfg.get("reasoning_budget_tokens") is not None:  # #123: a default thinking budget for every request
         try:
             svc.reasoning_budget_tokens = cfg["reasoning_budget_tokens"]
@@ -2478,7 +2565,10 @@ def main() -> int:
     if a.config:                                        # the Chat settings shared with other apps, from last time
         svc.shared_path = str(Path(a.config).with_suffix("")) + ".shared-settings.json"
         try:
-            svc.shared = clean_shared_defaults(json.loads(Path(svc.shared_path).read_text(encoding="utf-8")))
+            saved_defaults = json.loads(Path(svc.shared_path).read_text(encoding="utf-8"))
+            if isinstance(saved_defaults, dict):
+                saved_defaults.pop("reasoning_repetition_guard", None)  # migrated to config-only control
+            svc.shared = clean_shared_defaults(saved_defaults)
             if svc.shared:
                 print("[strata] other apps use the Chat settings: " +
                       ", ".join(f"{k}={v}" for k, v in svc.shared.items()), flush=True)

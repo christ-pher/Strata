@@ -979,6 +979,7 @@ bool qsa_prompt_attn_batch(const float* q, const QsaAttnPools& pools, const int3
     {   // sm_75 or newer: the MMA above compiles for both.  sm_80+ runs the cp.async kernel (launch_i8); Turing has
         // no cp.async, so it runs the v1 kernel (launch<1>, same accuracy, another summation order).  An older card
         // keeps the old kernel.
+        // #371: the compute capability with its minor - sm_70 (V100) has no m16n8k8 (the kernels trap below sm_75)
         static int cc[64] = {};
         int dev = 0;
         if (cudaGetDevice(&dev) != cudaSuccess || dev < 0 || dev >= 64) { cudaGetLastError(); return false; }
@@ -990,7 +991,10 @@ bool qsa_prompt_attn_batch(const float* q, const QsaAttnPools& pools, const int3
                 return false;
             }
             const char* w = std::getenv("STRATA_QSA_WARP");
-            cc[dev] = w && (!std::strcmp(w, "1") || !std::strcmp(w, "attn")) ? 70 : major * 10 + minor;
+            // A warp override cannot enable unsupported tensor instructions on Volta.
+            if (10 * major + minor < 75) return false;
+            cc[dev] = w && (!std::strcmp(w, "1") || !std::strcmp(w, "attn")) ? 75
+                      : 10 * strata::cc_major_of(major) + strata::cc_minor_of(minor);
         }
         if (cc[dev] < 75) return false;
         turing = cc[dev] < 80;
